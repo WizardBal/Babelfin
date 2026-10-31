@@ -1,0 +1,5 @@
+* text=auto eol=lf
+*.png -text
+
+# Preserve upstream license bytes, including its final blank line.
+LICENSE whitespace=-blank-at-eof

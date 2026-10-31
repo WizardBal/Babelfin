@@ -1,0 +1,511 @@
+/* Babelfin's own page ({BaseUrl}/Babelfin/app): a Jellyfin-like dark palette. The shared components (ui.js) read the same
+   --bf-* variables. No external fonts or resources. Compact on phones (≤ 600 px, no horizontal scrolling at 360 px), larger type
+   on TV-sized screens. */
+
+:root {
+    color-scheme: dark;
+    --bf-bg: #101010;
+    --bf-panel: #1c1c1c;
+    --bf-surface: rgba(255, 255, 255, 0.04);
+    --bf-surface-2: rgba(255, 255, 255, 0.08);
+    --bf-border: rgba(255, 255, 255, 0.12);
+    --bf-text: #eeeeee;
+    --bf-dim: rgba(255, 255, 255, 0.66);
+    --bf-accent: #00a4dc;
+    --bf-danger: #ff6b6b;
+    --bf-warn: #f0b400;
+    --bf-radius: 10px;
+    --bf-gap: 1rem;
+    --bf-max: 52rem;
+    --bf-side: max(1rem, env(safe-area-inset-left), env(safe-area-inset-right));
+    font-size: 16px;
+}
+
+*,
+*::before,
+*::after {
+    box-sizing: border-box;
+}
+
+html,
+body {
+    margin: 0;
+    background: var(--bf-bg);
+    color: var(--bf-text);
+    font-family: system-ui, -apple-system, "Segoe UI", Roboto, "Noto Sans", "Helvetica Neue", Arial, sans-serif;
+    line-height: 1.45;
+    -webkit-text-size-adjust: 100%;
+}
+
+body.bf-has-savebar {
+    padding-bottom: 7rem;
+}
+
+a {
+    color: var(--bf-accent);
+}
+
+h1,
+h2,
+h3 {
+    line-height: 1.2;
+}
+
+.bf-app {
+    min-height: 100vh;
+}
+
+/* Header */
+
+.bf-header {
+    display: flex;
+    align-items: flex-start;
+    gap: var(--bf-gap);
+    max-width: var(--bf-max);
+    margin: 0 auto;
+    padding: 1.2rem var(--bf-side) 0.4rem;
+}
+
+.bf-back {
+    flex: 0 0 auto;
+    margin-top: 0.2rem;
+    text-decoration: none;
+    padding: 0.45em 0.8em;
+    border-radius: 999px;
+    background: var(--bf-surface-2);
+    color: var(--bf-text);
+    white-space: nowrap;
+}
+
+.bf-back:hover,
+.bf-back:focus-visible {
+    background: rgba(255, 255, 255, 0.14);
+}
+
+/* Inside jellyfin-web, under Jellyfin's own header (which has the way back): less space above the title. */
+.bf-embedded .bf-header {
+    padding-top: 0.6rem;
+}
+
+.bf-heading {
+    min-width: 0;
+}
+
+.bf-heading h1 {
+    margin: 0;
+    font-size: 1.7rem;
+    overflow-wrap: anywhere;
+}
+
+.bf-subtitle {
+    margin: 0.25em 0 0;
+    color: var(--bf-dim);
+}
+
+.bf-status:empty {
+    display: none;
+}
+
+.bf-note {
+    margin: 0.5rem 0 0;
+    padding: 0.5rem 0.8rem;
+    border-radius: var(--bf-radius);
+    background: var(--bf-surface);
+    border-inline-start: 4px solid var(--bf-warn);
+}
+
+/* Layout */
+
+.bf-main {
+    max-width: var(--bf-max);
+    margin: 0 auto;
+    padding: 0 var(--bf-side) 2rem;
+}
+
+.bf-section {
+    margin: 0.8rem 0;
+    padding: 0.9rem 1rem;
+    background: var(--bf-surface);
+    border: 1px solid var(--bf-border);
+    border-radius: var(--bf-radius);
+}
+
+.bf-section[hidden] {
+    display: none;
+}
+
+.bf-section-title {
+    margin: 0 0 0.5rem;
+    font-size: 1.2rem;
+}
+
+.bf-message {
+    margin-top: 2rem;
+    text-align: center;
+}
+
+.bf-message .bf-actions {
+    justify-content: center;
+}
+
+.bf-actions {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0.6em;
+    align-items: center;
+}
+
+.bf-link-button {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    box-sizing: border-box;
+    text-decoration: none;
+}
+
+.bf-translation-notice {
+    color: inherit;
+    text-decoration: underline;
+    text-underline-offset: 0.15em;
+}
+
+/* My languages */
+
+.bf-languages-line {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    justify-content: space-between;
+    gap: 0.5em 1em;
+}
+
+.bf-languages-text {
+    flex: 1 1 14em;
+    min-width: 0;
+    display: flex;
+    align-items: center;
+    gap: 0.15em;
+}
+
+.bf-languages-summary {
+    flex: 0 1 auto;
+    min-width: 0;
+    font-weight: 600;
+    overflow-wrap: anywhere;
+}
+
+.bf-languages-editor {
+    margin-top: 0.6rem;
+}
+
+.bf-languages-editor[hidden] {
+    display: none;
+}
+
+.bf-detected {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 0.5em 0.8em;
+    margin: 0.7rem 0 0;
+    color: var(--bf-dim);
+}
+
+.bf-detected[hidden] {
+    display: none;
+}
+
+/* The list of burned-in titles */
+
+.bf-items {
+    list-style: none;
+    margin: 0;
+    padding: 0;
+}
+
+.bf-item {
+    display: flex;
+    align-items: center;
+    gap: 0.5em 0.8em;
+    padding: 0.55rem 0;
+    border-top: 1px solid var(--bf-border);
+}
+
+.bf-item:first-child {
+    border-top: 0;
+}
+
+.bf-item-text {
+    flex: 1 1 auto;
+    min-width: 0;
+    display: flex;
+    flex-direction: column;
+}
+
+.bf-item-name {
+    font-weight: 600;
+    overflow-wrap: anywhere;
+}
+
+.bf-item-meta {
+    color: var(--bf-dim);
+    font-size: 0.92em;
+    overflow-wrap: anywhere;
+}
+
+.bf-item > .bfui-btn {
+    flex: 0 0 auto;
+}
+
+/* Show and movie overrides: a section like Advanced, but its heading is the button of BabelfinUI.disclosure; the table inside is the
+   shared component's */
+
+.bf-overrides {
+    padding: 0;
+}
+
+.bf-overrides .bfui-disclosure-heading {
+    font-size: 1.2rem;
+}
+
+.bf-overrides .bfui-disclosure-button {
+    padding: 0.9rem 1rem;
+    border-radius: var(--bf-radius);
+}
+
+.bf-overrides .bfui-disclosure-body {
+    padding: 0 1rem 1rem;
+}
+
+.bf-overrides-help {
+    margin: 0 0 0.6rem;
+}
+
+/* Advanced */
+
+.bf-advanced {
+    padding: 0;
+}
+
+.bf-advanced-summary {
+    list-style: none;
+    cursor: pointer;
+    display: flex;
+    align-items: center;
+    gap: 0.6em;
+    padding: 0.9rem 1rem;
+    border-radius: var(--bf-radius);
+}
+
+.bf-advanced-summary::-webkit-details-marker {
+    display: none;
+}
+
+.bf-advanced-summary .bf-section-title {
+    margin: 0;
+}
+
+.bf-advanced-summary::before {
+    content: "";
+    flex: 0 0 auto;
+    width: 0.55em;
+    height: 0.55em;
+    border-right: 2px solid var(--bf-dim);
+    border-bottom: 2px solid var(--bf-dim);
+    transform: rotate(-45deg);
+    transition: transform 0.15s;
+}
+
+details[open] > .bf-advanced-summary::before {
+    transform: rotate(45deg);
+}
+
+.bf-advanced-summary:focus-visible,
+.bf-back:focus-visible {
+    outline: 2px solid var(--bf-accent);
+    outline-offset: 2px;
+}
+
+.bf-advanced-body {
+    padding: 0 1rem 1rem;
+}
+
+.bf-advanced-top {
+    padding: 0 0 0.6rem;
+}
+
+/* The groups inside Advanced (BabelfinUI.disclosure): a heading button each, closed by default */
+
+.bf-advanced .bf-group .bfui-disclosure-heading {
+    font-size: 1.05rem;
+}
+
+.bf-advanced .bf-group:last-of-type {
+    border-bottom: 1px solid var(--bf-border);
+}
+
+/* "Restore defaults", after the last group */
+
+.bf-advanced-restore {
+    padding: 0.9rem 0 0.2rem;
+}
+
+.bf-group-help {
+    margin: 0 0 0.4rem;
+}
+
+.bf-group .bfui-switch {
+    padding: 0.35rem 0;
+}
+
+/* Save bar */
+
+.bf-savebar {
+    position: fixed;
+    left: 0;
+    right: 0;
+    bottom: 0;
+    z-index: 1000;
+    background: rgba(28, 28, 28, 0.97);
+    border-top: 1px solid var(--bf-border);
+    box-shadow: 0 -10px 30px rgba(0, 0, 0, 0.5);
+    padding: 0.7rem var(--bf-side) calc(0.7rem + env(safe-area-inset-bottom));
+}
+
+.bf-savebar[hidden] {
+    display: none;
+}
+
+.bf-savebar-row {
+    max-width: var(--bf-max);
+    margin: 0 auto;
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    justify-content: space-between;
+    gap: 0.6em;
+}
+
+.bf-savebar-status {
+    color: var(--bf-dim);
+}
+
+.bf-savebar-errors {
+    max-width: var(--bf-max);
+    margin: 0 auto 0.5rem;
+    max-height: 30vh;
+    overflow: auto;
+    color: var(--bf-danger);
+}
+
+.bf-savebar-errors p {
+    margin: 0 0 0.3em;
+    font-weight: 600;
+}
+
+.bf-savebar-errors ul {
+    margin: 0;
+    padding-inline-start: 1.2em;
+}
+
+/* The shared components on this page */
+
+.bf-app .bfui-btn,
+.bf-app .bfui-select,
+.bf-app .bfui-input {
+    font-size: 1rem;
+}
+
+/* Phones */
+
+@media (max-width: 600px) {
+    :root {
+        font-size: 15px;
+        --bf-gap: 0.6rem;
+    }
+
+    .bf-header {
+        flex-direction: column;
+        gap: 0.5rem;
+        padding-top: 0.8rem;
+    }
+
+    .bf-back {
+        margin-top: 0;
+    }
+
+    .bf-heading h1 {
+        font-size: 1.4rem;
+    }
+
+    .bf-section {
+        padding: 0.75rem;
+    }
+
+    .bf-advanced,
+    .bf-overrides {
+        padding: 0;
+    }
+
+    .bf-advanced-summary,
+    .bf-overrides .bfui-disclosure-button {
+        padding: 0.75rem;
+    }
+
+    .bf-overrides .bfui-disclosure-body {
+        padding: 0 0.75rem 0.75rem;
+    }
+
+    .bf-advanced-body {
+        padding: 0 0.75rem 0.75rem;
+    }
+
+    .bf-app .bfui-row > .bfui-select {
+        flex: 1 1 100%;
+        width: 100%;
+    }
+
+    .bf-item {
+        flex-wrap: wrap;
+    }
+
+    .bf-savebar-row .bf-actions {
+        flex: 1 1 100%;
+    }
+
+    .bf-savebar-row .bf-actions .bfui-btn {
+        flex: 1 1 0;
+    }
+}
+
+/* TV and large screens: readable from the couch */
+
+@media (min-width: 1600px) {
+    :root {
+        font-size: 20px;
+        --bf-max: 64rem;
+    }
+}
+
+@media (min-width: 2400px) {
+    :root {
+        font-size: 26px;
+    }
+}
+
+@media (prefers-reduced-motion: reduce) {
+    *,
+    *::before,
+    *::after {
+        transition: none !important;
+        scroll-behavior: auto !important;
+    }
+}
+
+.bf-conflict { border: 2px solid #dfad45; border-radius: .4em; padding: 1em; margin: 1em 0; background: #332b19; color: #fff; }
+html.bf-tv :focus { outline: 3px solid #70cfff; outline-offset: 3px; box-shadow: 0 0 0 6px #102c3e; }
+
+.bfui .bf-conflict, .bfui.bf-conflict { background: var(--jf-palette-background-paper, #332b19); color: var(--jf-palette-text-primary, #fff); }
+.bfui .bf-conflict p, .bfui.bf-conflict p { color: inherit; overflow-wrap: anywhere; }
+.bfui .bf-conflict .bfui-btn, .bfui.bf-conflict .bfui-btn { color: inherit; background: transparent; border-color: currentColor; }
+.bf-savebar .bfui-btn[aria-disabled="true"] { opacity: 0.4; }

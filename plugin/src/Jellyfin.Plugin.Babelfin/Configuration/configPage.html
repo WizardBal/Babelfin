@@ -1,0 +1,133 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="utf-8">
+    <title>Babelfin</title>
+</head>
+<body>
+<div id="babelfinConfigPage" data-role="page" class="page type-interior pluginConfigurationPage babelfinDashboard" data-require="emby-input,emby-button,emby-checkbox,emby-select">
+    <div data-role="content">
+        <div class="content-primary bf-dash">
+            <div class="bf-head">
+                <h2 class="sectionTitle">Babelfin</h2>
+                <p class="bf-lede" data-i18n="page.lede">Chooses each person's audio and subtitle tracks before playback starts.</p>
+                <p class="bf-alert bf-alert-error hide" id="bfNotStarted" role="alert" data-i18n="page.notStarted">Babelfin couldn't start. Check the server log.</p>
+                <p class="bf-alert bf-alert-error hide" id="bfLoadError" role="alert" data-i18n="page.loadError">The settings couldn't be loaded. Reload the page.</p>
+                <label class="checkboxContainer"><input is="emby-checkbox" type="checkbox" id="bfEnabled"><span data-i18n="page.enabled">Enabled</span></label>
+            </div>
+
+            <section class="bf-section" data-section="libraries">
+                <h3 class="bf-section-title" id="bfDefaultsTitle"><span data-i18n="defaults.title">Defaults for everyone</span></h3>
+                <p class="bf-hint bf-section-lede" data-i18n="defaults.help">People who leave a row on Default get these. Changes apply right away.</p>
+                <div id="bfLibraries"></div>
+            </section>
+
+            <section class="bf-section" data-section="people">
+                <h3 class="bf-section-title" data-i18n="people.title">People</h3>
+                <div id="bfPeople"></div>
+            </section>
+
+            <details class="bf-fold" data-fold="advanced">
+                <summary><h3 class="bf-section-title" data-i18n="advanced.title">Advanced</h3></summary>
+                <div class="bf-fold-body" id="bfAdvanced"></div>
+            </details>
+
+            <details class="bf-fold" data-fold="tools">
+                <summary><h3 class="bf-section-title" data-i18n="tools.title">Troubleshooting</h3></summary>
+                <div class="bf-fold-body" id="bfTools"></div>
+            </details>
+
+            <details class="bf-fold" data-fold="backup">
+                <summary><h3 class="bf-section-title" data-i18n="backup.title">Back up and restore</h3></summary>
+                <div class="bf-fold-body" id="bfBackup"></div>
+            </details>
+
+            <div class="bf-savebar hide" id="bfSaveBar">
+                <div class="bf-alert bf-alert-error hide" id="bfSaveError" role="alert"></div>
+                <div class="bf-savebar-buttons">
+                    <button is="emby-button" type="button" class="raised button-submit" id="bfSave"><span data-i18n="common.save">Save</span></button>
+                    <button is="emby-button" type="button" class="raised" id="bfDiscard"><span data-i18n="common.cancel">Cancel</span></button>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <script type="text/javascript">
+        (function () {
+            // Loads Babelfin's admin assets from {BaseUrl}/Babelfin/assets (stylesheet, translation loader, shared UI pieces, page script)
+            // and hands the page to window.BabelfinDashboard. Nothing is saved here or on load.
+            var pluginId = 'dc7f86a9-90f3-4282-93d9-424fb4c64b4d';
+            var page = document.querySelector('#babelfinConfigPage');
+            var ready = null;
+
+            function asset(name, version) {
+                return ApiClient.getUrl('Babelfin/assets/' + name, version ? { v: version } : undefined);
+            }
+
+            function loadScript(url, globalName) {
+                if (window[globalName]) {
+                    return Promise.resolve(window[globalName]);
+                }
+
+                return new Promise(function (resolve, reject) {
+                    var script = document.createElement('script');
+                    script.src = url;
+                    script.async = false;
+                    script.onload = function () { resolve(window[globalName]); };
+                    script.onerror = function () { reject(new Error('Could not load ' + globalName)); };
+                    document.head.appendChild(script);
+                });
+            }
+
+            function loadCss(url) {
+                if (document.querySelector('link[data-babelfin-dashboard]')) {
+                    return;
+                }
+
+                var link = document.createElement('link');
+                link.rel = 'stylesheet';
+                link.href = url;
+                link.setAttribute('data-babelfin-dashboard', '1');
+                document.head.appendChild(link);
+            }
+
+            function start() {
+                if (!ready) {
+                    // The status gives the asset version (cache busting) and whether Babelfin started; its counters are not shown.
+                    ready = ApiClient.getJSON(ApiClient.getUrl('Babelfin/Admin/Status')).then(null, function () { return null; }).then(function (status) {
+                        var version = status && status.version;
+                        loadCss(asset('dashboard.css', version));
+                        return Promise.all([
+                            loadScript(asset('i18n.js', version), 'BabelfinI18n'),
+                            loadScript(asset('ui.js', version), 'BabelfinUI')
+                        ]).then(function () {
+                            return loadScript(asset('dashboard.js', version), 'BabelfinDashboard');
+                        }).then(function () {
+                            return status;
+                        });
+                    });
+                    ready.then(null, function () { ready = null; });
+                }
+
+                ready.then(function (status) {
+                    window.BabelfinDashboard.show(page, { pluginId: pluginId, status: status });
+                }, function (err) {
+                    console.error('[Babelfin] the admin page failed to load', err);
+                    page.querySelector('#bfLoadError').classList.remove('hide');
+                    Dashboard.hideLoadingMsg();
+                });
+            }
+
+            function stop() {
+                if (window.BabelfinDashboard) {
+                    window.BabelfinDashboard.hide(page);
+                }
+            }
+
+            page.addEventListener('pageshow', start);
+            page.addEventListener('pagehide', stop);
+        })();
+    </script>
+</div>
+</body>
+</html>

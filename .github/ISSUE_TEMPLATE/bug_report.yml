@@ -1,0 +1,81 @@
+name: Bug report
+description: Report a reproducible Babelfin problem.
+title: "[Bug] "
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thanks for reporting a beta issue. Include the player mode as well as the app name: browser TV layout and native Android TV are different paths.
+        Before sharing logs or screenshots, remove API keys, access tokens, passwords, account IDs, server addresses and media paths. Use sample names for people and titles. Do not upload your full Jellyfin configuration or Babelfin settings export.
+  - type: input
+    id: jellyfin_version
+    attributes:
+      label: Jellyfin server version
+      placeholder: "For example, 12.2.0"
+    validations:
+      required: true
+  - type: input
+    id: babelfin_version
+    attributes:
+      label: Babelfin version
+      description: Copy the installed version from Dashboard → Plugins.
+      placeholder: "For example, 0.19.0.0 beta"
+    validations:
+      required: true
+  - type: dropdown
+    id: installation_method
+    attributes:
+      label: Installation method
+      description: How was this Babelfin version installed?
+      options:
+        - Plugin catalog
+        - Manual file copy
+        - Other / not sure
+    validations:
+      required: true
+  - type: input
+    id: app_version
+    attributes:
+      label: App and version
+      description: Include the browser version if using Jellyfin Web.
+      placeholder: "App name, app version, browser version if applicable"
+    validations:
+      required: true
+  - type: input
+    id: player_mode
+    attributes:
+      label: Device, operating system and player mode
+      description: Say whether this is a web desktop/mobile/TV layout, a native app, or an external player.
+    validations:
+      required: true
+  - type: textarea
+    id: reproduce
+    attributes:
+      label: Steps to reproduce
+      description: Include relevant Babelfin settings and whether playback was started manually or by autoplay. Use sample names.
+      placeholder: |
+        1. Set audio to … and subtitles to …
+        2. Open …
+        3. Start playback …
+    validations:
+      required: true
+  - type: textarea
+    id: expected_actual
+    attributes:
+      label: Expected and actual behavior
+      description: For track problems, list available languages and full/signs/forced/SDH labels. Say which audio/subtitle track you expected and which played.
+    validations:
+      required: true
+  - type: textarea
+    id: sanitized_logs
+    attributes:
+      label: Sanitized logs and explanation
+      description: Paste a short relevant Jellyfin/Babelfin log excerpt and, if available, Troubleshooting → Check a title → Why. If unavailable, say so. Remove credentials, account IDs, server addresses and media paths first.
+      render: text
+    validations:
+      required: true
+  - type: textarea
+    id: screenshots
+    attributes:
+      label: Sanitized screenshots or other context
+      description: Optional. Check all visible names, addresses, paths and credentials before attaching an image.

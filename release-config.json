@@ -1,0 +1,7 @@
+{
+  "project_url": "https://github.com/WizardBal/Babelfin",
+  "source_url": "https://github.com/WizardBal/Babelfin/releases/download/v0.19.0-beta.1/Babelfin-0.19.0.0.zip",
+  "repository_url": "https://github.com/WizardBal/Babelfin/releases/download/catalog/manifest.json",
+  "image_url": "https://raw.githubusercontent.com/WizardBal/Babelfin/main/plugin/package/logo.png",
+  "changelog": "First public beta. Babelfin chooses audio and subtitles from each person's preferences: ordered languages, library and genre defaults, and show or movie overrides, with full, signs-and-songs and SDH subtitle choices. It remembers track changes you make and can back up and restore all settings. Tested with Jellyfin 12.4 and the Jellyfin Android app on Google Pixel 11 Pro XL. Automated integration tests use Jellyfin Web on a disposable Jellyfin 12.2 test instance. Android TV, Swiftfin, Streamyfin and physical TVs have not been tested."
+}

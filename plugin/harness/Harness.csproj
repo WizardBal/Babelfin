@@ -1,0 +1,29 @@
+<Project Sdk="Microsoft.NET.Sdk.Web">
+  <!-- Test host for Babelfin: runs the plugin's DI wrapper, decorator, middleware, controller and action filter
+       against Jellyfin's published 12.2.0 assemblies (the supported server version), with a self-contained companion middleware fixture.
+       Usage: dotnet run -c Release (then the output folder) -->
+  <PropertyGroup>
+    <TargetFramework>net10.0</TargetFramework>
+    <AssemblyName>Harness</AssemblyName>
+    <Nullable>enable</Nullable>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <OutputType>Exe</OutputType>
+    <NoWarn>CS1591;CS8618;ASP0000</NoWarn>
+  </PropertyGroup>
+  <ItemGroup>
+    <ProjectReference Include="../src/Jellyfin.Plugin.Babelfin/Jellyfin.Plugin.Babelfin.csproj" />
+    <Compile Include="../tests/Babelfin.Engine.Tests/Settings/PersonStoreSeedExtensions.cs" Link="PersonStoreSeedExtensions.cs" />
+  </ItemGroup>
+  <ItemGroup>
+    <!-- The server's versions: the plugin is compiled against 12.0.0 and binds to these at runtime, as on the server. -->
+    <PackageReference Include="Jellyfin.Controller" Version="12.2.0" />
+    <PackageReference Include="Jellyfin.Model" Version="12.2.0" />
+    <PackageReference Include="Jellyfin.Common" Version="12.2.0" />
+    <PackageReference Include="Jellyfin.Data" Version="12.2.0" />
+    <PackageReference Include="Jellyfin.Database.Implementations" Version="12.2.0" />
+  </ItemGroup>
+  <ItemGroup>
+    <!-- Stand-in for jellyfin-web's index.html. -->
+    <None Include="index.html" CopyToOutputDirectory="PreserveNewest" />
+  </ItemGroup>
+</Project>

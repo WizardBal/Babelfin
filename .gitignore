@@ -1,0 +1,44 @@
+# Build output
+/dist/
+/plugin/package/stage/
+/package/stage/
+**/bin/
+**/obj/
+/plugin/harness/interop/*.dll
+/harness/interop/*.dll
+
+# Generated test output and interpreter caches
+**/TestResults/
+**/__pycache__/
+*.py[cod]
+*.log
+
+# Local runtimes, verification evidence and release staging
+/.rig/
+/.verification/
+/.artifacts/
+/.test-tmp/
+/deliver/
+/evidence/
+**/.verification/
+**/.test-tmp/
+
+# Private planning, configuration and credentials
+/.private/
+/.env
+/.env.*
+!/.env.example
+*.local
+*.local.*
+*.pem
+*.key
+*.pfx
+*.p12
+/*-brief.md
+/*-notes-*.md
+/M*-findings.md
+/M*-design.md
+/UI-spec.md
+/docs/phase-*.md
+/docs/release-acceptance.md
+/docs/provider-spike.md

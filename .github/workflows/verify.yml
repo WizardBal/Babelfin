@@ -1,0 +1,219 @@
+name: Build and test
+
+on:
+  push:
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: verify-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  verify:
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest]
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 90
+    env:
+      DOTNET_CLI_TELEMETRY_OPTOUT: '1'
+      DOTNET_NOLOGO: '1'
+      PYTHONUTF8: '1'
+      PYTHONUNBUFFERED: '1'
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-dotnet@a98b56852c35b8e3190ac28c8c2271da59106c68 # v6.0.0
+        with:
+          global-json-file: global.json
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version: '24.x'
+          package-manager-cache: false
+      - uses: actions/setup-python@6d4fd22b20465ccc0f7354476588e8df7c9ca0e0 # v7.1.0
+        with:
+          python-version: '3.14'
+
+      - name: Locate Chrome for layout checks
+        shell: bash
+        run: |
+          python - <<'PY'
+          import os
+          import shutil
+          from pathlib import Path
+          candidates = [os.environ.get('CHROME_PATH'), shutil.which('google-chrome'),
+                        shutil.which('chromium'), shutil.which('chromium-browser'),
+                        r'C:\Program Files\Google\Chrome\Application\chrome.exe',
+                        r'C:\Program Files (x86)\Google\Chrome\Application\chrome.exe']
+          chrome = next((str(Path(value).resolve()) for value in candidates
+                         if value and Path(value).is_file()), None)
+          if not chrome or any(ord(char) < 32 for char in chrome):
+              raise SystemExit('Chrome is required for the conflict-panel layout checks; set CHROME_PATH.')
+          with Path(os.environ['GITHUB_ENV']).open('a', encoding='utf-8') as stream:
+              stream.write('CHROME_PATH=' + chrome + '\n')
+          PY
+
+      # All Node/Python checks use the standard libraries; no npm/pip install or server credentials.
+      - name: Auth and UI regressions
+        timeout-minutes: 5
+        run: node --test tools/tests/auth-regression.test.js tools/tests/browser-driver.test.js tools/tests/preference-ui.test.js tools/tests/release-ui.test.js tools/tests/web-lifecycle.test.js tools/tests/web-regression.test.js tools/tests/admin-regression.test.js tools/tests/docs.test.js tools/tests/conflict-contrast-browser.test.js
+      - name: Coverage collector identity checks
+        timeout-minutes: 5
+        run: node --test tools/coverage/coverage.test.cjs
+      - name: Maintained UI smoke and translation checks
+        id: ui-smoke
+        timeout-minutes: 15
+        run: python -X utf8 tools/tests/ui-smoke/run.py --assets plugin/src/Jellyfin.Plugin.Babelfin/Assets --output "${{ runner.temp }}/babelfin-ui-smoke"
+      - name: Print UI smoke failure logs
+        if: ${{ failure() && steps.ui-smoke.outcome == 'failure' }}
+        shell: bash
+        env:
+          SMOKE_LOGS: ${{ runner.temp }}/babelfin-ui-smoke
+        run: |
+          shopt -s nullglob
+          for log in "$SMOKE_LOGS"/*.log; do
+            printf '\n--- %s ---\n' "$(basename "$log")"
+            cat "$log"
+          done
+      - name: Package and source tests
+        timeout-minutes: 5
+        run: python -m unittest -v tools.tests.test_package tools.tests.test_source_archive tools.tests.test_source_identity tools.tests.test_catalog_package tools.tests.test_language_input tools.tests.test_source_encoding
+
+      - name: Repository ignore and tracked-file hygiene
+        timeout-minutes: 5
+        run: python -I tools/test_gitignore.py
+
+      - name: Build the plugin
+        run: dotnet build plugin/src/Jellyfin.Plugin.Babelfin/Jellyfin.Plugin.Babelfin.csproj --configuration Release --warnaserror
+      - name: Validate built DLL version and source identity
+        shell: bash
+        timeout-minutes: 5
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+          from tools import package
+          dll = Path('plugin/src/Jellyfin.Plugin.Babelfin/bin/Release/net10.0/Jellyfin.Plugin.Babelfin.dll')
+          commit = package.verify_dll(dll, Path(package.PROJECT), package.read_version(), dll.read_bytes())
+          print('DLL metadata matches clean source commit: ' + commit)
+          PY
+      - name: Upload deterministic plugin DLL
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: babelfin-dll-${{ runner.os }}
+          retention-days: 7
+          if-no-files-found: error
+          path: plugin/src/Jellyfin.Plugin.Babelfin/bin/Release/net10.0/Jellyfin.Plugin.Babelfin.dll
+      - name: Engine and native-policy unit tests
+        run: dotnet test plugin/tests/Babelfin.Engine.Tests/Babelfin.Engine.Tests.csproj --configuration Release --logger "console;verbosity=minimal"
+      - name: Jellyfin 12.2 binding and JIT
+        shell: bash
+        run: dotnet run --project plugin/bindtest/app/App.csproj --configuration Release -- "${{ github.workspace }}/plugin/src/Jellyfin.Plugin.Babelfin/bin/Release/net10.0" --source-commit "$(git rev-parse HEAD)"
+      - name: Loopback HTTP and companion middleware checks
+        timeout-minutes: 10
+        run: dotnet run --project plugin/harness/Harness.csproj --configuration Release -- "${{ runner.temp }}/babelfin-http-${{ github.run_id }}-${{ github.run_attempt }}"
+      # Running Jellyfin's own policy for comparison needs its official 12.2 runtime folder; compilation does not.
+      - name: Build native-policy checker
+        run: dotnet build tools/native-policy-check/NativePolicyCheck.csproj --configuration Release --warnaserror
+
+      - name: Build the release package (Linux)
+        if: runner.os == 'Linux'
+        shell: bash
+        timeout-minutes: 25
+        run: |
+          commit_time="$(git show -s --format=%cI HEAD)"
+          python tools/package.py \
+            --dll plugin/src/Jellyfin.Plugin.Babelfin/bin/Release/net10.0/Jellyfin.Plugin.Babelfin.dll \
+            --config release-config.json \
+            --timestamp "$commit_time" \
+            --output "$RUNNER_TEMP/babelfin-real-package"
+          python tools/source_archive.py \
+            --commit "$(git rev-parse HEAD)" \
+            --tag v0.19.0-beta.1 \
+            --output "$RUNNER_TEMP/babelfin-real-package"
+          cp NOTICE "$RUNNER_TEMP/babelfin-real-package/NOTICE"
+          (
+            cd "$RUNNER_TEMP/babelfin-real-package"
+            sha256sum -c Babelfin-0.19.0.0.zip.sha256 Babelfin-0.19.0.0-source.zip.sha256
+            sha256sum --binary \
+              Babelfin-0.19.0.0.zip \
+              Babelfin-0.19.0.0.zip.md5 \
+              Babelfin-0.19.0.0.zip.sha256 \
+              manifest.json \
+              Babelfin-0.19.0.0-source.zip \
+              Babelfin-0.19.0.0-source.zip.sha256 \
+              NOTICE > "$RUNNER_TEMP/babelfin-tested-release.sha256"
+          )
+      - name: Verify release bytes
+        id: verify_release_bytes
+        if: runner.os == 'Linux'
+        shell: bash
+        timeout-minutes: 2
+        run: |
+          python - "$RUNNER_TEMP/babelfin-real-package" \
+            "$RUNNER_TEMP/babelfin-tested-release.sha256" <<'PY'
+          import hashlib
+          import json
+          import sys
+          from pathlib import Path
+
+          package, snapshot = map(Path, sys.argv[1:])
+          zip_name = "Babelfin-0.19.0.0.zip"
+          files = [zip_name, zip_name + ".md5", zip_name + ".sha256",
+                   "manifest.json",
+                   "Babelfin-0.19.0.0-source.zip", "Babelfin-0.19.0.0-source.zip.sha256", "NOTICE"]
+          rows = [line.split(" *", 1) for line in snapshot.read_text(encoding="ascii").splitlines()]
+          recorded = {name: digest for digest, name in rows}
+          if len(rows) != len(files) or set(recorded) != set(files):
+              raise SystemExit("The release snapshot is incomplete or has unexpected files.")
+          current = {name: hashlib.sha256((package / name).read_bytes()).hexdigest() for name in files}
+          if current != recorded:
+              raise SystemExit("Release bytes changed after the snapshot; refusing package upload.")
+          print(json.dumps({"package_sha256": current[zip_name], "files_sha256": current}, indent=2))
+          PY
+      - name: Upload Linux release package
+        if: ${{ runner.os == 'Linux' && steps.verify_release_bytes.outcome == 'success' }}
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        timeout-minutes: 5
+        with:
+          name: babelfin-linux-release-package-${{ github.run_id }}-${{ github.run_attempt }}
+          retention-days: 7
+          if-no-files-found: error
+          include-hidden-files: false
+          path: |
+            ${{ runner.temp }}/babelfin-real-package/Babelfin-0.19.0.0.zip
+            ${{ runner.temp }}/babelfin-real-package/Babelfin-0.19.0.0.zip.md5
+            ${{ runner.temp }}/babelfin-real-package/Babelfin-0.19.0.0.zip.sha256
+            ${{ runner.temp }}/babelfin-real-package/manifest.json
+            ${{ runner.temp }}/babelfin-real-package/Babelfin-0.19.0.0-source.zip
+            ${{ runner.temp }}/babelfin-real-package/Babelfin-0.19.0.0-source.zip.sha256
+            ${{ runner.temp }}/babelfin-real-package/NOTICE
+
+  reproducibility:
+    needs: verify
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Download Windows and Linux DLLs
+        uses: actions/download-artifact@634f93cb2916e3fdff6788551b99b062d0335ce0 # v5.0.0
+        with:
+          pattern: babelfin-dll-*
+          path: dlls
+      - name: Require byte-identical cross-platform builds
+        shell: bash
+        run: |
+          python3 - <<'PY'
+          import hashlib
+          from pathlib import Path
+          paths = [Path('dlls') / ('babelfin-dll-' + os) / 'Jellyfin.Plugin.Babelfin.dll'
+                   for os in ('Windows', 'Linux')]
+          hashes = [hashlib.sha256(path.read_bytes()).hexdigest() for path in paths]
+          if len(set(hashes)) != 1:
+              raise SystemExit('Windows and Linux plugin DLLs differ: ' + ', '.join(hashes))
+          print('Windows/Linux DLL SHA-256: ' + hashes[0])
+          PY

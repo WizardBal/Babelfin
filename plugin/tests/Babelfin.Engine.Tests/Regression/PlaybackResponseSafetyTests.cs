@@ -1,0 +1,485 @@
+using System;
+using System.Collections.Generic;
+using System.IO;
+using System.Linq;
+using System.Reflection;
+using System.Security.Claims;
+using System.Threading;
+using System.Threading.Tasks;
+using Babelfin.Engine.Tests.Settings;
+using Jellyfin.Database.Implementations.Entities;
+using Jellyfin.Plugin.Babelfin;
+using Jellyfin.Plugin.Babelfin.Api;
+using Jellyfin.Plugin.Babelfin.Configuration;
+using Jellyfin.Plugin.Babelfin.Decisions;
+using Jellyfin.Plugin.Babelfin.Library;
+using Jellyfin.Plugin.Babelfin.Playback;
+using Jellyfin.Plugin.Babelfin.Resolution;
+using Jellyfin.Plugin.Babelfin.Settings;
+using MediaBrowser.Common.Configuration;
+using MediaBrowser.Controller.Entities.TV;
+using MediaBrowser.Controller.Library;
+using MediaBrowser.Controller.Session;
+using MediaBrowser.Model.Dto;
+using MediaBrowser.Model.Entities;
+using MediaBrowser.Model.Serialization;
+using Microsoft.AspNetCore.Http;
+using Microsoft.AspNetCore.Mvc;
+using Microsoft.AspNetCore.Mvc.Controllers;
+using Microsoft.AspNetCore.Mvc.Filters;
+using Microsoft.AspNetCore.Mvc.ModelBinding;
+using Microsoft.AspNetCore.Routing;
+using Microsoft.Extensions.Logging.Abstractions;
+using Microsoft.Extensions.DependencyInjection;
+using Xunit;
+
+namespace Babelfin.Engine.Tests.Regression;
+
+[CollectionDefinition("Playback response safety globals", DisableParallelization = true)]
+public sealed class PlaybackResponseSafetyCollection { }
+
+[Collection("Playback response safety globals")]
+public sealed class PlaybackResponseSafetyTests : IDisposable
+{
+    private static readonly DateTime T0 = new(2026, 10, 23, 12, 0, 0, DateTimeKind.Utc);
+    private readonly Plugin? _previous = Plugin.Instance;
+    private readonly string _folder = Path.Combine(Path.GetTempPath(), "babelfin-playback-response-" + Guid.NewGuid().ToString("N"));
+
+    public void Dispose()
+    {
+        typeof(Plugin).GetField("<Instance>k__BackingField", BindingFlags.Static | BindingFlags.NonPublic)!.SetValue(null, _previous);
+    }
+
+    [Theory]
+    [InlineData(false, -20)]
+    [InlineData(true, -20)]
+    [InlineData(false, -5)]
+    [InlineData(true, -5)]
+    public async Task OnlyAStartedOtherItemSuppressesAServedPickerChoice(bool hasStart, int servedOffset)
+    {
+        var fixture = Create();
+        fixture.ServeAt(T0.AddSeconds(servedOffset));
+        fixture.Registry.Update("session", play =>
+        {
+            play.UserId = fixture.User.Id;
+            play.ItemId = Guid.NewGuid();
+            play.Playing = true;
+            play.StartedAt = hasStart ? T0.AddSeconds(-10) : null;
+            play.LastProgressAt = T0.AddSeconds(-1);
+            play.LastStoppedItemId = Guid.NewGuid();
+            play.LastStoppedAt = T0.AddSeconds(-30);
+        });
+
+        for (var request = 0; request < 2; request++)
+        {
+            var context = await fixture.Request("Jellyfin Web", 1);
+            if (hasStart)
+            {
+                Assert.Empty(fixture.Store.TryGet(fixture.User.Id)!.Overrides);
+                Assert.Equal(2, context.ActionArguments["audioStreamIndex"]);
+                Assert.False(fixture.Registry.Get("session")!.ManualChanged);
+            }
+            else
+            {
+                Assert.Single(fixture.Store.TryGet(fixture.User.Id)!.Overrides);
+                Assert.Equal(1, context.ActionArguments["audioStreamIndex"]);
+            }
+        }
+    }
+
+    [Theory]
+    [InlineData(-1, false)]
+    [InlineData(0, false)]
+    [InlineData(1, true)]
+    public async Task OnlyAPickerServedAfterTheLatestStopCanRememberDuringAutoplay(int servedOffset, bool manual)
+    {
+        var fixture = Create();
+        fixture.ServeAt(T0.AddSeconds(-10 + servedOffset));
+        fixture.Registry.Update("session", play =>
+        {
+            play.UserId = fixture.User.Id;
+            play.Playing = false;
+            play.LastStoppedItemId = Guid.NewGuid();
+            play.LastStoppedAt = T0.AddSeconds(-10);
+        });
+
+        var context = await fixture.Request("Jellyfin Web", 1);
+
+        Assert.Equal(manual ? 1 : 2, context.ActionArguments["audioStreamIndex"]);
+        if (manual)
+        {
+            var remembered = Assert.Single(fixture.Store.TryGet(fixture.User.Id)!.Overrides);
+            Assert.Equal(OverrideScope.Series, remembered.Scope);
+            Assert.Equal(Ids.N(Ids.Series), remembered.ItemId);
+            Assert.Equal("en", remembered.Manual!.Audio!.Language);
+        }
+        else Assert.Empty(fixture.Store.TryGet(fixture.User.Id)!.Overrides);
+    }
+
+    [Theory]
+    [InlineData("static")]
+    [InlineData("playback")]
+    [InlineData("defaults")]
+    public async Task DeciderFailureReplacesTheOldDecisionAndPreservesServedHistory(string entryPoint)
+    {
+        var fixture = Create();
+        fixture.ServeAt(T0.AddSeconds(-5));
+        var served = fixture.Stats.GetServed(fixture.User.Id, fixture.Item.Id, "source", "device", "Jellyfin Web");
+        fixture.FailDecision = true;
+        var source = Source();
+
+        if (entryPoint == "static") source = Assert.Single(fixture.Manager.GetStaticMediaSources(fixture.Item, true, fixture.User));
+        else if (entryPoint == "playback") source = Assert.Single(await fixture.Manager.GetPlaybackMediaSources(fixture.Item, fixture.User, false, true, CancellationToken.None));
+        else fixture.Manager.SetDefaultAudioAndSubtitleStreamIndices(fixture.Item, source, fixture.User);
+
+        Assert.Equal((1, -1), (source.DefaultAudioStreamIndex, source.DefaultSubtitleStreamIndex));
+        var latest = fixture.Stats.GetDecision(fixture.User.Id, fixture.Item.Id, source.Id);
+        Assert.NotNull(latest);
+        Assert.Null(latest.Decision);
+        Assert.Equal(DecisionOutcome.PassedThrough, latest.Outcome);
+        Assert.Equal((1, -1), (latest.JellyfinAudioIndex, latest.JellyfinSubtitleIndex));
+        Assert.Equal(1, fixture.Stats.Errors);
+        Assert.Same(served, fixture.Stats.GetServed(fixture.User.Id, fixture.Item.Id, source.Id, "device", "Jellyfin Web"));
+        fixture.Stats.RecordResponse(fixture.User.Id, source, "device", "Jellyfin Web");
+        Assert.Equal(1, fixture.Stats.GetServed(fixture.User.Id, fixture.Item.Id, source.Id, "device", "Jellyfin Web")!.JellyfinAudioIndex);
+    }
+
+    [Fact]
+    public async Task PlaybackInfoAfterADeciderFailureDoesNotReuseTheOldDecision()
+    {
+        var fixture = Create();
+        fixture.Manager.GetStaticMediaSources(fixture.Item, true, fixture.User);
+        fixture.FailDecision = true;
+        fixture.Config.CompatibilityMode = true;
+        fixture.Config.FindAppMode("Jellyfin Web")!.Mode = AppModeKind.ReplaceUnlessManual;
+
+        var context = await fixture.Request("Jellyfin Web", 2);
+
+        Assert.Equal(2, context.ActionArguments["audioStreamIndex"]);
+        Assert.False(context.ActionArguments.ContainsKey("mediaSourceId"));
+        Assert.Null(fixture.Registry.Get("session"));
+        Assert.Empty(fixture.Store.TryGet(fixture.User.Id)!.Overrides);
+        Assert.Empty(fixture.Compatibility.Calls);
+    }
+
+    [Theory]
+    [InlineData(false, true)]
+    [InlineData(true, true)]
+    [InlineData(true, false)]
+    public async Task ClientNamesCannotCauseUnboundedConfigurationSaveAttempts(bool failSave, bool rotateName)
+    {
+        var fixture = Create();
+        fixture.Plugin.FailSave = failSave;
+        var client = "invented-" + Guid.NewGuid().ToString("N");
+        for (var i = 0; i < 150; i++)
+        {
+            await fixture.Request(rotateName ? "invented-" + Guid.NewGuid().ToString("N") : client, null);
+        }
+
+        Assert.Equal(1, fixture.Plugin.SaveAttempts);
+        Assert.True(fixture.Config.AppModes.Count(row => row.SeenOnly) <= 50);
+        Assert.NotNull(fixture.Config.FindAppMode("Jellyfin Web"));
+    }
+
+    [Fact]
+    public async Task ConfiguredClientModeStillAppliesWhenDiscoveryWritesAreThrottled()
+    {
+        var fixture = Create();
+        await fixture.Request("invented-" + Guid.NewGuid().ToString("N"), null);
+        var client = "configured-" + Guid.NewGuid().ToString("N");
+        fixture.Config.AppModes.Add(new AppMode { Client = client, Mode = AppModeKind.ReplaceUnlessManual });
+        var context = await fixture.Request(client, 1);
+        Assert.Equal(2, context.ActionArguments["audioStreamIndex"]);
+        Assert.Equal(1, fixture.Plugin.SaveAttempts);
+    }
+
+    [Fact]
+    public async Task InPlayChangesStillRememberWhenAnotherItemStoppedEarlier()
+    {
+        var fixture = Create();
+        fixture.ServeAt(T0.AddSeconds(-20));
+        fixture.Registry.Update("session", play =>
+        {
+            play.UserId = fixture.User.Id;
+            play.ItemId = fixture.Item.Id;
+            play.Playing = true;
+            play.StartedAt = T0.AddSeconds(-10);
+            play.LastProgressAt = T0.AddSeconds(-1);
+            play.HasExpected = true;
+            play.ExpectedAudio = 2;
+            play.ExpectedSubtitle = -1;
+            play.LastStoppedItemId = Guid.NewGuid();
+            play.LastStoppedAt = T0.AddSeconds(-30);
+        });
+        var context = await fixture.Request("Jellyfin Web", 1);
+        Assert.Equal(1, context.ActionArguments["audioStreamIndex"]);
+        Assert.Equal(OverrideScope.Series, Assert.Single(fixture.Store.TryGet(fixture.User.Id)!.Overrides).Scope);
+        Assert.True(fixture.Registry.Get("session")!.ManualChanged);
+    }
+
+    [Fact]
+    public async Task ThrottledDiscoveryUpdatesAreSavedWithTheNextHourlyAttempt()
+    {
+        var fixture = Create();
+        var first = "first-" + Guid.NewGuid().ToString("N");
+        var pending = "pending-" + Guid.NewGuid().ToString("N");
+        await fixture.Request(first, null);
+        await fixture.Request(pending, null);
+        Assert.Equal(1, fixture.Plugin.SaveAttempts);
+        Assert.DoesNotContain(pending, fixture.Plugin.SavedClients);
+        Assert.NotNull(fixture.Config.FindAppMode(pending));
+
+        fixture.SetTime(T0.AddHours(1).AddSeconds(1));
+        await fixture.Request(first, null);
+
+        Assert.Equal(2, fixture.Plugin.SaveAttempts);
+        Assert.Contains(pending, fixture.Plugin.SavedClients);
+    }
+
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task QueuedNextItemKeepsTheActivePlayAndAdoptsExpectedTracks(bool stopBeforeAdoption)
+    {
+        var fixture = Create();
+        var previousItem = Guid.NewGuid();
+        fixture.ServeAt(T0.AddSeconds(-20));
+        fixture.Registry.Update("session", play =>
+        {
+            play.UserId = fixture.User.Id;
+            play.ItemId = previousItem;
+            play.Playing = true;
+            play.StartedAt = T0.AddSeconds(-10);
+            play.LastProgressAt = T0.AddSeconds(-1);
+            play.HasExpected = true;
+            play.ExpectedAudio = 1;
+            play.LastStoppedAt = T0.AddSeconds(-30);
+            play.LastStoppedItemId = Guid.NewGuid();
+        });
+
+        await fixture.Request("Jellyfin Web", 1);
+
+        var active = fixture.Registry.Get("session")!;
+        Assert.Equal(previousItem, active.ItemId);
+        Assert.Equal(1, active.ExpectedAudio);
+        var pending = fixture.Registry.GetPending("device", "Jellyfin Web", fixture.Item.Id);
+        Assert.NotNull(pending);
+        Assert.Equal(2, pending.ExpectedAudio);
+        if (stopBeforeAdoption)
+        {
+            fixture.Registry.Update("session", play =>
+            {
+                play.LastStoppedItemId = previousItem;
+                play.LastStoppedAt = T0.AddSeconds(1);
+                play.ResetPlay();
+            });
+            fixture.SetTime(T0.AddSeconds(1));
+            await fixture.Request("Jellyfin Web", 1);
+        }
+        else Assert.NotNull(fixture.Registry.Adopt("session", "device", "Jellyfin Web", fixture.Item.Id, fixture.User.Id));
+
+        var adopted = fixture.Registry.Get("session")!;
+        Assert.Equal(fixture.Item.Id, adopted.ItemId);
+        Assert.Equal(2, adopted.ExpectedAudio);
+        Assert.False(adopted.ManualChanged);
+        Assert.Null(fixture.Registry.GetPending("device", "Jellyfin Web", fixture.Item.Id));
+        Assert.Empty(fixture.Store.TryGet(fixture.User.Id)!.Overrides);
+
+        if (stopBeforeAdoption)
+        {
+            fixture.ServeAt(T0.AddSeconds(2));
+            fixture.SetTime(T0.AddSeconds(3));
+            await fixture.Request("Jellyfin Web", 1);
+            Assert.Equal(1, fixture.Registry.Get("session")!.ExpectedAudio);
+            Assert.Single(fixture.Store.TryGet(fixture.User.Id)!.Overrides);
+        }
+    }
+    [Theory]
+    [InlineData("success-not-started")]
+    [InlineData("failed")]
+    [InlineData("cancelled")]
+    public async Task AnUnstartedRequestDoesNotReplaceTheNextItemsRealPickerChoice(string outcome)
+    {
+        var fixture = Create();
+        if (outcome == "failed") await Assert.ThrowsAsync<IOException>(() => fixture.Request("Jellyfin Web", null, outcome));
+        else if (outcome == "cancelled") await Assert.ThrowsAnyAsync<OperationCanceledException>(() => fixture.Request("Jellyfin Web", null, outcome));
+        else await fixture.Request("Jellyfin Web", null, outcome);
+        var prepared = fixture.Registry.Get("session")!;
+        Assert.False(prepared.Playing);
+        Assert.Null(prepared.StartedAt);
+        Assert.Null(prepared.LastProgressAt);
+        fixture.Item.Id = Guid.NewGuid();
+        fixture.ServeAt(T0.AddSeconds(1));
+        fixture.SetTime(T0.AddSeconds(2));
+        var picked = await fixture.Request("Jellyfin Web", 1);
+        Assert.Equal(1, picked.ActionArguments["audioStreamIndex"]);
+        Assert.Single(fixture.Store.TryGet(fixture.User.Id)!.Overrides);
+        Assert.False(fixture.Registry.Get("session")!.Playing);
+    }
+
+    [Theory]
+    [InlineData(false, -1)]
+    [InlineData(true, -121)]
+    [InlineData(true, -3600)]
+    public async Task AnUnstartedOrStaleOtherItemDoesNotCountAsAnAutoplayTransition(bool started, int progressSeconds)
+    {
+        var fixture = Create();
+        fixture.ServeAt(T0.AddSeconds(-1));
+        fixture.Registry.Update("session", play =>
+        {
+            play.UserId = fixture.User.Id;
+            play.ItemId = Guid.NewGuid();
+            play.Playing = true;
+            play.StartedAt = started ? T0.AddHours(-2) : null;
+            play.LastProgressAt = T0.AddSeconds(progressSeconds);
+        });
+        var picked = await fixture.Request("Jellyfin Web", 1);
+        Assert.Equal(1, picked.ActionArguments["audioStreamIndex"]);
+        Assert.Single(fixture.Store.TryGet(fixture.User.Id)!.Overrides);
+    }
+
+    [Theory]
+    [InlineData("other-device", "Jellyfin Web", false)]
+    [InlineData("device", "Other app", false)]
+    [InlineData("DEVICE", "Jellyfin Web", false)]
+    [InlineData("", "Jellyfin Web", false)]
+    [InlineData("device", "", false)]
+    [InlineData("device", "jellyfin web", true)]
+    [InlineData("device", "Jellyfin Web", true)]
+    public async Task APrePlayPickIsRememberedOnlyForTheDeviceAndAppThatReceivedThePicker(string servedDevice, string servedClient, bool remember)
+    {
+        var fixture = Create();
+        var source = Assert.Single(fixture.Manager.GetStaticMediaSources(fixture.Item, true, fixture.User));
+        using var services = new ServiceCollection().AddSingleton(fixture.Stats).BuildServiceProvider();
+        var http = new DefaultHttpContext
+        {
+            RequestServices = services,
+            User = new ClaimsPrincipal(new ClaimsIdentity(new[]
+            {
+                new Claim(ClaimsHelper.UserIdClaim, fixture.User.Id.ToString()),
+                new Claim(ClaimsHelper.DeviceIdClaim, servedDevice),
+                new Claim(ClaimsHelper.ClientClaim, servedClient),
+            }, "test")),
+        };
+        var action = new ActionContext(http, new RouteData(), new ControllerActionDescriptor(), new ModelStateDictionary());
+        var result = new ObjectResult(new { MediaSources = new[] { source } });
+        await new Jellyfin.Plugin.Babelfin.Web.GuardedPlaybackInfoFilter().OnResultExecutionAsync(
+            new ResultExecutingContext(action, new List<IFilterMetadata>(), result, new object()),
+            () => Task.FromResult(new ResultExecutedContext(action, new List<IFilterMetadata>(), result, new object())));
+        await fixture.Request("Jellyfin Web", 1);
+        Assert.Equal(remember ? 1 : 0, fixture.Store.TryGet(fixture.User.Id)!.Overrides.Count);
+    }
+
+    private Fixture Create()
+    {
+        Directory.CreateDirectory(_folder);
+        var paths = CallProxy.Create<IApplicationPaths>((method, _) => method.ReturnType == typeof(string) ? _folder : null).Proxy;
+        var config = new PluginConfiguration { ConfigVersion = PluginConfiguration.CurrentVersion };
+        return new Fixture(new CountingPlugin(paths, CallProxy.Create<IXmlSerializer>().Proxy, config));
+    }
+
+    private sealed class CountingPlugin : Plugin
+    {
+        internal int SaveAttempts;
+        internal bool FailSave;
+        internal string[] SavedClients = Array.Empty<string>();
+        internal CountingPlugin(IApplicationPaths paths, IXmlSerializer xml, PluginConfiguration config) : base(paths, xml)
+        {
+            Configuration = config;
+            SaveAttempts = 0;
+        }
+        public override void SaveConfiguration()
+        {
+            SaveAttempts++;
+            if (FailSave) throw new IOException("Test configuration write failure");
+            SavedClients = Configuration.AppModes.Select(row => row.Client).ToArray();
+        }
+    }
+
+    private static MediaSourceInfo Source() => new()
+    {
+        Id = "source", DefaultAudioStreamIndex = 1, DefaultSubtitleStreamIndex = -1,
+        MediaStreams = new List<MediaStream>
+        {
+            new() { Index = 1, Type = MediaStreamType.Audio, Language = "eng", Codec = "aac", Channels = 2 },
+            new() { Index = 2, Type = MediaStreamType.Audio, Language = "jpn", Codec = "aac", Channels = 2 },
+        },
+    };
+
+    private sealed class Fixture
+    {
+        internal readonly CountingPlugin Plugin;
+        internal PluginConfiguration Config => Plugin.Configuration;
+        internal readonly User User = new("Playback test", "Default", "Default") { Id = Ids.Person };
+        internal readonly Episode Item = new() { Id = Ids.Item, Name = "Episode", SeriesId = Ids.Series, SeasonId = Ids.Season, SeriesName = "Test show" };
+        internal readonly FakePersonStore Store = new();
+        internal readonly PlayRegistry Registry;
+        internal readonly DecoratorStats Stats;
+        internal readonly BabelfinMediaSourceManager Manager;
+        internal readonly CallProxy Compatibility;
+        internal bool FailDecision;
+        private DateTime _now = T0;
+        private readonly Func<PlaybackInfoFilter> _newFilter;
+
+        internal Fixture(CountingPlugin plugin)
+        {
+            Plugin = plugin;
+            Stats = new DecoratorStats(() => _now);
+            Registry = new PlayRegistry(() => _now);
+            var person = Ctx.Person(new[] { "en" }, new[] { "en" });
+            person.Everyday.Memory = MemoryScope.RestOfShow;
+            Store.Save(person);
+            var resolver = CallProxy.Create<IProfileResolver>((method, _) => method.Name == "Resolve" ? Ctx.Resolve(Store.TryGet(User.Id)!, Config, Ctx.Episode()) : null).Proxy;
+            var activity = new ListActivityLog();
+            var recorder = new TrackChangeRecorder(resolver, Store, activity, NullLogger<TrackChangeRecorder>.Instance);
+            var inner = CallProxy.Create<IMediaSourceManager>((method, _) => method.Name switch
+            {
+                nameof(IMediaSourceManager.GetStaticMediaSources) => new[] { Source() },
+                nameof(IMediaSourceManager.GetPlaybackMediaSources) => Task.FromResult<IReadOnlyList<MediaSourceInfo>>(new[] { Source() }),
+                _ => null,
+            }).Proxy;
+            var decider = CallProxy.Create<ITrackDecider>((_, _) => FailDecision ? throw new InvalidOperationException("Test decider failure") : new TrackDecision(2, -1, Array.Empty<string>())).Proxy;
+            Manager = new BabelfinMediaSourceManager(inner, decider, Stats, NullLogger.Instance);
+            var users = CallProxy.Create<IUserManager>((method, _) => method.Name == nameof(IUserManager.GetUserById) ? User : null).Proxy;
+            var library = CallProxy.Create<ILibraryManager>((method, _) => method.Name == nameof(ILibraryManager.GetItemById) ? Item : null).Proxy;
+            var sessions = CallProxy.Create<ISessionManager>((method, _) => method.Name == "get_Sessions" ? new[] { new SessionInfo(null!, NullLogger.Instance) { Id = "session", DeviceId = "device", Client = "Jellyfin Web", UserId = User.Id } } : null).Proxy;
+            var compatibility = CallProxy.Create<ICompatibilityWriter>();
+            Compatibility = compatibility.Recorder;
+            _newFilter = () => new PlaybackInfoFilter(users, library, Manager, Stats, Registry, recorder, sessions, activity, compatibility.Proxy, NullLogger<PlaybackInfoFilter>.Instance);
+        }
+
+        internal void SetTime(DateTime time) => _now = time;
+
+        internal void ServeAt(DateTime time)
+        {
+            _now = time;
+            var source = Assert.Single(Manager.GetStaticMediaSources(Item, true, User));
+            Stats.RecordResponse(User.Id, source, "device", "Jellyfin Web");
+            _now = T0;
+        }
+
+        internal async Task<ActionExecutingContext> Request(string client, int? audio, string outcome = "success-not-started")
+        {
+            var http = new DefaultHttpContext
+            {
+                User = new ClaimsPrincipal(new ClaimsIdentity(new[]
+                {
+                    new Claim(ClaimsHelper.UserIdClaim, User.Id.ToString()),
+                    new Claim(ClaimsHelper.ClientClaim, client),
+                    new Claim(ClaimsHelper.DeviceIdClaim, "device"),
+                }, "test")),
+            };
+            var action = new ActionContext(http, new RouteData(), new ControllerActionDescriptor { ControllerName = "MediaInfo", ActionName = "GetPostedPlaybackInfo" }, new ModelStateDictionary());
+            var args = new Dictionary<string, object?> { ["itemId"] = Item.Id };
+            if (audio.HasValue) args["audioStreamIndex"] = audio.Value;
+            var context = new ActionExecutingContext(action, new List<IFilterMetadata>(), args, new object());
+            await _newFilter().OnActionExecutionAsync(context, () => outcome switch
+            {
+                "failed" => Task.FromException<ActionExecutedContext>(new IOException("Synthetic playback request failure")),
+                "cancelled" => Task.FromCanceled<ActionExecutedContext>(new CancellationToken(true)),
+                _ => Task.FromResult(new ActionExecutedContext(action, new List<IFilterMetadata>(), new object())),
+            });
+            return context;
+        }
+    }
+}

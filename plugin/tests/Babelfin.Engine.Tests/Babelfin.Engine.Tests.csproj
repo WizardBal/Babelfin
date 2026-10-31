@@ -1,0 +1,35 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <TargetFramework>net10.0</TargetFramework>
+    <RootNamespace>Babelfin.Engine.Tests</RootNamespace>
+    <AssemblyName>Babelfin.Engine.Tests</AssemblyName>
+    <Nullable>enable</Nullable>
+    <ImplicitUsings>disable</ImplicitUsings>
+    <TreatWarningsAsErrors>true</TreatWarningsAsErrors>
+    <IsPackable>false</IsPackable>
+    <IsTestProject>true</IsTestProject>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <PackageReference Include="Microsoft.NET.Test.Sdk" Version="17.14.1" />
+    <PackageReference Include="xunit" Version="2.9.3" />
+    <PackageReference Include="xunit.runner.visualstudio" Version="3.1.5" />
+  </ItemGroup>
+
+  <!-- The plugin compiles against Jellyfin without runtime assets; the tests need them so the plugin assembly loads. The engine itself never touches these. -->
+  <ItemGroup>
+    <PackageReference Include="Jellyfin.Controller" Version="12.2.0" />
+    <PackageReference Include="Jellyfin.Model" Version="12.2.0" />
+    <PackageReference Include="Jellyfin.Common" Version="12.2.0" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <None Update="Fixtures/v0181-admin-export.json" CopyToOutputDirectory="PreserveNewest" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\..\src\Jellyfin.Plugin.Babelfin\Jellyfin.Plugin.Babelfin.csproj" />
+  </ItemGroup>
+
+</Project>

@@ -1,0 +1,45 @@
+name: Feature request
+description: Describe a problem Babelfin could help solve.
+title: "[Request] "
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Describe what you want to accomplish and how you handle it today. Include sample names and sanitized examples only; remove credentials, account IDs, server addresses and media paths from any logs or screenshots.
+  - type: input
+    id: jellyfin_version
+    attributes:
+      label: Jellyfin server version
+    validations:
+      required: true
+  - type: input
+    id: babelfin_version
+    attributes:
+      label: Babelfin version
+    validations:
+      required: true
+  - type: input
+    id: app_version
+    attributes:
+      label: App and version
+      description: Include browser version, device and player mode if relevant.
+    validations:
+      required: true
+  - type: textarea
+    id: problem
+    attributes:
+      label: What problem are you trying to solve?
+      description: Describe the current behavior and its effect on your viewing.
+    validations:
+      required: true
+  - type: textarea
+    id: desired
+    attributes:
+      label: What would you like to happen?
+    validations:
+      required: true
+  - type: textarea
+    id: alternatives
+    attributes:
+      label: Workarounds or other context
+      description: Optional. Include sanitized logs only if they help explain the problem.

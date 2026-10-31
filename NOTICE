@@ -1,0 +1,108 @@
+Babelfin
+Copyright (c) 2026 WizardBal
+
+Babelfin is distributed under the GNU General Public License version 3 only
+(GPL-3.0-only). The complete license text is in LICENSE. This notice records the
+upstream material and dependencies identified in the source inventory; it does
+not claim legal clearance or replace the upstream notices linked below.
+
+Adapted subtitle policy
+----------------------
+Local file: plugin/src/Jellyfin.Plugin.Babelfin/Engine/Selection/VideoSubtitleSelector.cs
+Upstream: Jellyfin Project contributors, MediaStreamSelector.cs,
+GetDefaultSubtitleStreamIndex and its ordering policy.
+Source revision: 6c073e19ddf604b2369c638716164fdab4c952dc
+https://github.com/jellyfin/jellyfin/blob/6c073e19ddf604b2369c638716164fdab4c952dc/Emby.Server.Implementations/Library/MediaStreamSelector.cs
+Local modifications (2026): classified-track input, normalized preferred-language
+list, Babelfin track representation and parity tests against Jellyfin 12.2.
+The upstream file has no separate copyright or GPL-2.0-only header. Its root
+LICENSE contains the unmodified GPL version 2 text. Jellyfin's published plugin
+guidance says the linked plugin packages and resulting plugin binary use GPLv3:
+https://github.com/jellyfin/jellyfin-plugin-template#licensing
+Jellyfin maintainer Joshua M. Boniface describes the project's practical GPLv3
+basis and inherited licensing history in these public statements:
+https://github.com/jellyfin/jellyfin/issues/16653#issuecomment-4269777721
+https://github.com/jellyfin/jellyfin/issues/16653#issuecomment-4270503070
+These statements are recorded as the basis for GPLv3-compatible distribution,
+not as a representation that Babelfin can relicense third-party copyrights.
+
+Language data
+-------------
+Local input: tools/data/iso6392.txt
+Generated output: plugin/src/Jellyfin.Plugin.Babelfin/Engine/Languages/IsoLanguages.g.cs
+Generator: tools/gen_languages.py
+Upstream: Jellyfin Project contributors' ISO 639-2 localization table.
+https://github.com/jellyfin/jellyfin/blob/6c073e19ddf604b2369c638716164fdab4c952dc/Emby.Server.Implementations/Localization/iso6392.txt
+The pinned input reproduces all generated entries and alternate names. Local
+transformations (2026) normalize codes, split scripts/regions, omit undefined
+codes, retain alternate names and use explicit display-name overrides.
+The input has no additional copyright/license header. The Jellyfin licensing
+basis described above applies; the unmodified input is retained as source.
+
+Authentication constants
+------------------------
+Local file: plugin/src/Jellyfin.Plugin.Babelfin/Api/ClaimsHelper.cs
+Upstream: Jellyfin Project contributors' InternalClaimTypes constants.
+https://github.com/jellyfin/jellyfin/blob/6c073e19ddf604b2369c638716164fdab4c952dc/Jellyfin.Api/Constants/InternalClaimTypes.cs
+Local modifications (2026): a subset of protocol claim names with independent
+parsing helpers for the plugin's available API. The upstream file contains no
+separate copyright/license header. See the Jellyfin licensing basis above.
+
+Build and runtime references
+----------------------------
+Jellyfin.Controller, Jellyfin.Model and Jellyfin.Common 12.0.0 are compile-time
+references. Their package metadata identifies Jellyfin Contributors and
+GPL-3.0-only. Jellyfin supplies the assemblies at runtime; none is bundled in
+the plugin ZIP. Exact declarations at the source revision used by the packages:
+https://github.com/jellyfin/jellyfin/blob/6c073e19ddf604b2369c638716164fdab4c952dc/MediaBrowser.Controller/MediaBrowser.Controller.csproj
+https://github.com/jellyfin/jellyfin/blob/6c073e19ddf604b2369c638716164fdab4c952dc/MediaBrowser.Model/MediaBrowser.Model.csproj
+https://github.com/jellyfin/jellyfin/blob/6c073e19ddf604b2369c638716164fdab4c952dc/MediaBrowser.Common/MediaBrowser.Common.csproj
+The .NET/ASP.NET Core runtime is supplied by Jellyfin, not bundled here.
+The GPLv3 text in LICENSE is preserved verbatim from the Jellyfin plugin
+template's LICENSE at revision 618b1d57d5ee22c84d53b94acda83faba323a302:
+https://github.com/jellyfin/jellyfin-plugin-template/blob/618b1d57d5ee22c84d53b94acda83faba323a302/LICENSE
+Its Free Software Foundation copyright and permission notice remain intact.
+No verbatim plugin-template implementation was identified in the inventory.
+
+Binding-test assembly loader
+----------------------------
+Local file: plugin/bindtest/app/Program.cs, PluginLoadContext.
+Upstream: Jellyfin Project contributors' PluginLoadContext.cs.
+https://github.com/jellyfin/jellyfin/blob/6c073e19ddf604b2369c638716164fdab4c952dc/Emby.Server.Implementations/Plugins/PluginLoadContext.cs
+Local modifications (2026): sealed local test-class visibility and surrounding
+binding/JIT fixture integration. The loader body is retained. The upstream file
+has no separate copyright/license header; the Jellyfin licensing basis above
+applies. This adapted fixture is in corresponding source, not the plugin DLL.
+
+Test-only dependencies
+----------------------
+The test projects reference Jellyfin 12.2.0 (GPL-3.0-only),
+Microsoft.NET.Test.Sdk 17.14.1 (MIT; Microsoft Corporation), and xUnit 2.9.3 /
+xunit.runner.visualstudio 3.1.5 (Apache-2.0; James Newkirk, Brad Wilson and the
+.NET Foundation). Their installed NuGet metadata supplies these declarations.
+Optional coverage uses Coverlet and the versions locked in
+tools/coverage/package-lock.json: v8-to-istanbul 9.3.0 (ISC),
+istanbul-lib-coverage 3.2.2, istanbul-lib-report 3.0.1 and istanbul-reports 3.2.0
+(BSD-3-Clause). Each tool keeps its own license in its separate installation. Those
+tools, runtime distributions and their dependencies are downloaded separately,
+not redistributed in the plugin ZIP (Jellyfin.Plugin.Babelfin.dll, LICENSE,
+NOTICE, logo.png and meta.json) or corresponding-source archive.
+The native-policy checker invokes Jellyfin's own policy from an installed
+server assembly for comparison. It does not redistribute that assembly or copy
+its implementation.
+
+Other shipped material and corresponding source
+----------------------------------------------
+The Babelfin HTML/CSS/JavaScript, inline icons, logo and translations
+are included in this project. No third-party fonts,
+browser frameworks, competitor-plugin code or competitor translations are
+bundled. Jellyfin DOM/API compatibility and observed behavior are not presented
+as ownership of Jellyfin code.
+
+AI tools are used for development, review and all translations. Tested with Jellyfin 12.4 and the Jellyfin Android app on Google Pixel 11 Pro XL. Automated integration tests use Jellyfin Web on a disposable Jellyfin 12.2 test instance. Android TV, Swiftfin, Streamyfin and physical TVs have not been tested.
+
+The corresponding-source archive contains the complete tracked source tree,
+embedded assets, the pinned language input and generator, and build/install
+scripts. It contains no Git history, downloaded runtimes or private artifacts.
+See README and CONTRIBUTING for building and testing; SOURCE.json in the source
+archive identifies its exact commit, tree, intended release tag and version.

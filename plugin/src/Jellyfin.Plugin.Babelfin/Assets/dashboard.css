@@ -1,0 +1,205 @@
+.babelfinDashboard .bf-translation-notice {
+    display: inline-block;
+    margin: 0.5em 0;
+    color: inherit;
+    text-decoration: underline;
+    text-underline-offset: 0.15em;
+}
+
+/* Babelfin admin page. Jellyfin's dashboard supplies the fonts, colours and the emby-* controls; this adds layout only: sections,
+   the collapsible Advanced, Troubleshooting and Back up and restore with their groups, tables, rows, the Save bar and messages. Colours are translucent overlays
+   so they suit every Jellyfin theme. Everything is scoped to .babelfinDashboard. */
+
+.babelfinDashboard .hide { display: none !important; }
+
+.babelfinDashboard .bf-dash { max-width: 64rem; padding-bottom: 2em; }
+.babelfinDashboard .bf-head { margin-bottom: 0.6em; }
+.babelfinDashboard .bf-lede { opacity: 0.8; margin: 0 0 1em; line-height: 1.5; }
+.babelfinDashboard .bf-hint { font-size: 0.86em; opacity: 0.72; line-height: 1.45; margin: 0.4em 0 0.8em; }
+.babelfinDashboard .bf-sr { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; }
+
+/* Sections and the two collapsible ones */
+.babelfinDashboard .bf-section { margin: 1.6em 0 0; }
+.babelfinDashboard .bf-section-title { margin: 0 0 0.6em; font-size: 1.2em; font-weight: 500; }
+.babelfinDashboard .bf-section-lede { margin: -0.3em 0 0.8em; }
+.babelfinDashboard .bf-fold { margin: 1.6em 0 0; border-top: 1px solid rgba(255, 255, 255, 0.1); }
+.babelfinDashboard .bf-fold > summary { cursor: pointer; list-style: none; padding: 0.9em 0 0.3em; display: flex; align-items: center; gap: 0.6em; user-select: none; }
+.babelfinDashboard .bf-fold > summary::-webkit-details-marker { display: none; }
+.babelfinDashboard .bf-fold > summary::before { content: ""; width: 0.5em; height: 0.5em; border-right: 2px solid currentColor; border-bottom: 2px solid currentColor; transform: rotate(-45deg); transition: transform 0.15s ease; opacity: 0.7; flex: none; }
+.babelfinDashboard .bf-fold[open] > summary::before { transform: rotate(45deg); }
+.babelfinDashboard .bf-fold > summary .bf-section-title { margin: 0; }
+.babelfinDashboard .bf-fold > summary:focus-visible { outline: 2px solid currentColor; outline-offset: 2px; border-radius: 4px; }
+.babelfinDashboard .bf-fold-body { padding: 0.2em 0 0.6em; }
+/* The groups inside them (BabelfinUI.disclosure: a heading button each, closed by default) */
+.babelfinDashboard .bf-group { margin: 0; }
+.babelfinDashboard .bf-fold-body > .bf-group:last-of-type { border-bottom: 1px solid rgba(255, 255, 255, 0.07); }
+/* "Restore defaults", after Advanced's last group */
+.babelfinDashboard .bf-restore { margin: 0.4em 0 0; }
+.babelfinDashboard .bf-restore .bf-actions { margin: 0.8em 0 0.4em; }
+.babelfinDashboard .bf-group .bfui-disclosure-heading { font-size: 1em; font-weight: 500; }
+.babelfinDashboard .bf-group .bfui-disclosure-button { font-weight: 500; }
+.babelfinDashboard .bf-group .bfui-disclosure-body { padding: 0 0.25em 1em; }
+.babelfinDashboard .bf-group-title { margin: 1.2em 0 0.5em; font-size: 1em; font-weight: 500; }
+.babelfinDashboard .bf-sub-title { margin: 1em 0 0.4em; font-size: 0.95em; font-weight: 500; opacity: 0.85; }
+
+/* Rows: label above control */
+.babelfinDashboard .bf-row { margin: 0.7em 0; max-width: 40em; }
+.babelfinDashboard .bf-row-label { display: block; font-size: 0.9em; opacity: 0.85; margin: 0 0 0.3em; }
+.babelfinDashboard .bf-row-head { display: flex; align-items: center; gap: 0.1em; margin: 0 0 0.3em; }
+.babelfinDashboard .bf-row-head > .bf-row-label { margin: 0; }
+.babelfinDashboard .bf-row-control { display: flex; flex-wrap: wrap; align-items: flex-start; gap: 0.5em; }
+.babelfinDashboard .bf-row-control > .bfui { flex: 1 1 100%; }
+.babelfinDashboard .bf-check { margin: 0.5em 0; }
+/* Labels and titles with an "i" (BabelfinUI.infoTip) after their text */
+.babelfinDashboard .bf-has-info { display: flex; align-items: center; gap: 0.1em; flex-wrap: wrap; }
+.babelfinDashboard th.bf-has-info { display: table-cell; }
+.babelfinDashboard th.bf-has-info > span { vertical-align: middle; }
+.babelfinDashboard th.bf-has-info > .bfui-info-wrap { vertical-align: middle; }
+.babelfinDashboard .bf-check-line { display: flex; align-items: center; gap: 0.1em; }
+.babelfinDashboard .bf-title-line { display: flex; align-items: center; gap: 0.1em; }
+.babelfinDashboard .bf-title-line > h3, .babelfinDashboard .bf-title-line > h4, .babelfinDashboard .bf-title-line > h5 { margin: 0; }
+.babelfinDashboard .bf-section-title-line { margin: 0 0 0.6em; }
+.babelfinDashboard .bf-sub-title-line { margin: 1em 0 0.4em; }
+.babelfinDashboard .bf-check-line > .checkboxContainer { flex: 0 1 auto; width: auto; margin-bottom: 0; }
+.babelfinDashboard .bf-alert-ok { background: rgba(60, 180, 90, 0.13); border-color: rgba(60, 180, 90, 0.5); }
+.babelfinDashboard .bf-reset-title { margin-top: 2em; padding-top: 1.2em; border-top: 1px solid rgba(255, 255, 255, 0.12); }
+
+/* Messages */
+.babelfinDashboard .bf-alert { padding: 0.75em 1em; margin: 0.6em 0 1em; border-radius: 10px; line-height: 1.45; border: 1px solid transparent; }
+.babelfinDashboard .bf-alert-error { background: rgba(220, 50, 50, 0.13); border-color: rgba(220, 50, 50, 0.5); }
+.babelfinDashboard .bf-field-error { margin: 0.3em 0 0; font-size: 0.86em; color: #ff8a80; }
+.babelfinDashboard .bf-problem-title { font-weight: 500; }
+.babelfinDashboard .bf-problem-list { margin: 0.4em 0 0; padding-left: 1.2em; }
+.babelfinDashboard .bf-problem-ids { margin-top: 0.4em; font-size: 0.9em; word-break: break-all; }
+.babelfinDashboard .bf-warnings { margin: 0.5em 0; padding-left: 1.2em; }
+.babelfinDashboard .bf-toast { position: fixed; left: 50%; bottom: 2em; transform: translateX(-50%); z-index: 2000; padding: 0.7em 1.2em; border-radius: 10px; background: rgba(20, 20, 20, 0.95); color: #fff; box-shadow: 0 4px 18px rgba(0, 0, 0, 0.4); max-width: 90vw; }
+.babelfinDashboard .bf-toast-error { background: rgba(140, 25, 25, 0.95); }
+.babelfinDashboard .bf-detected { font-size: 0.85em; opacity: 0.75; font-style: italic; white-space: nowrap; }
+
+/* The Save bar: sticks to the bottom while there is something to save */
+.babelfinDashboard .bf-savebar { position: sticky; bottom: 0; z-index: 10; margin: 1.6em 0 0; padding: 0.8em 0; background: var(--jf-palette-background-default, rgba(16, 16, 16, 0.96)); border-top: 1px solid rgba(255, 255, 255, 0.12); }
+.babelfinDashboard .bf-savebar .bf-alert { margin: 0 0 0.7em; }
+.babelfinDashboard .bf-savebar-buttons { display: flex; flex-wrap: wrap; gap: 0.6em; }
+.babelfinDashboard .bf-savebar-buttons > button { margin: 0; flex: 0 1 auto; min-width: 8em; }
+
+/* Buttons: the text centred at any width. jellyfin-web's emby-button is a flex box that doesn't centre what it holds, so a button
+   wider than its text (the save bar's minimum width, a full-width button on a phone) would leave the text on the left. */
+.babelfinDashboard button.raised,
+.babelfinDashboard .bf-btn { display: inline-flex; align-items: center; justify-content: center; text-align: center; }
+
+/* Layout helpers */
+.babelfinDashboard .bf-inline { display: flex; flex-wrap: wrap; align-items: center; gap: 0.5em 0.8em; margin: 0.4em 0; }
+.babelfinDashboard .bf-actions { display: flex; flex-wrap: wrap; align-items: center; gap: 0.6em; margin: 0.9em 0 0.4em; }
+.babelfinDashboard .bf-actions > button[is="emby-button"] { margin: 0; }
+
+/* Plain controls created by the script */
+.babelfinDashboard .bf-input,
+.babelfinDashboard .bf-select,
+.babelfinDashboard .bf-textarea { font: inherit; color: inherit; background: rgba(255, 255, 255, 0.07); border: 1px solid rgba(255, 255, 255, 0.16); border-radius: 6px; padding: 0.45em 0.6em; box-sizing: border-box; max-width: 100%; }
+.babelfinDashboard .bf-input { width: 100%; }
+.babelfinDashboard .bf-select { min-width: 12em; }
+.babelfinDashboard .bf-select option { color: #000; background: #fff; }
+.babelfinDashboard .bf-textarea { width: 100%; resize: vertical; }
+.babelfinDashboard .bf-input:focus,
+.babelfinDashboard .bf-select:focus,
+.babelfinDashboard .bf-textarea:focus { outline: none; border-color: rgba(0, 164, 220, 0.8); }
+.babelfinDashboard .bf-btn { font: inherit; font-size: 0.9em; color: inherit; background: rgba(255, 255, 255, 0.08); border: 1px solid rgba(255, 255, 255, 0.18); border-radius: 6px; padding: 0.3em 0.75em; cursor: pointer; white-space: nowrap; }
+.babelfinDashboard .bf-btn:hover { background: rgba(255, 255, 255, 0.15); }
+.babelfinDashboard .bf-btn:disabled,
+.babelfinDashboard .bf-busy { opacity: 0.55; cursor: default; }
+.babelfinDashboard .bf-file { margin: 0.2em 0; }
+.babelfinDashboard .bf-langdrop { display: inline-flex; flex-wrap: wrap; align-items: flex-start; gap: 0.4em; max-width: 100%; }
+.babelfinDashboard .bf-chooser { display: inline-flex; flex-wrap: wrap; align-items: flex-start; gap: 0.4em; }
+
+/* Tables */
+.babelfinDashboard .bf-table-wrap { overflow-x: auto; margin: 0.5em 0; }
+.babelfinDashboard .bf-table { width: 100%; border-collapse: collapse; font-size: 0.94em; }
+.babelfinDashboard .bf-table th,
+.babelfinDashboard .bf-table td { text-align: left; vertical-align: middle; padding: 0.45em 0.6em; border-bottom: 1px solid rgba(255, 255, 255, 0.08); }
+.babelfinDashboard .bf-table thead th { font-weight: 500; opacity: 0.75; white-space: nowrap; }
+.babelfinDashboard .bf-table tbody th { font-weight: normal; }
+.babelfinDashboard .bf-table .bf-cell-action { text-align: right; white-space: nowrap; }
+.babelfinDashboard .bf-table .bf-cell-action .bf-btn + .bf-btn { margin-left: 0.4em; }
+.babelfinDashboard .bf-people .bf-people-audio,
+.babelfinDashboard .bf-people .bf-people-subtitles { overflow-wrap: anywhere; }
+.babelfinDashboard .bfui-table .bfui-table-all th,
+.babelfinDashboard .bfui-table .bfui-table-all td { background: rgba(255, 255, 255, 0.04); }
+.babelfinDashboard .bfui-table .bfui-table-name { font-weight: 500; }
+.babelfinDashboard .bfui-table .bfui-select { font-size: 0.95em; }
+/* The person editor sits inside the People table: its own table keeps the shared component's lines only */
+.babelfinDashboard .bf-table .bfui-table th,
+.babelfinDashboard .bf-table .bfui-table td { border-bottom: 0; }
+.babelfinDashboard .bf-editor-row > td { padding: 0.4em 0.8em 1.2em; background: rgba(255, 255, 255, 0.03); }
+.babelfinDashboard .bf-check-search { max-width: 34em; margin: 0.6em 0; }
+.babelfinDashboard .bf-check-name { min-width: 12em; }
+.babelfinDashboard .bf-why summary { cursor: pointer; white-space: nowrap; }
+.babelfinDashboard .bf-check-table tr[data-outcome="video"] .bf-why summary,
+.babelfinDashboard .bf-check-table tr[data-outcome="video"] td > span { opacity: 0.75; }
+.babelfinDashboard .bf-why div { margin-top: 0.3em; font-size: 0.88em; line-height: 1.4; max-width: 40em; overflow-wrap: anywhere; }
+.babelfinDashboard .bf-activity-when { white-space: nowrap; }
+
+/* The person editor */
+.babelfinDashboard .bf-person-head { display: flex; flex-wrap: wrap; align-items: baseline; gap: 0.6em; }
+.babelfinDashboard .bf-person-name { margin: 0.4em 0; font-size: 1.05em; font-weight: 500; }
+.babelfinDashboard .bf-person-table { margin: 0.3em 0 0.6em; }
+/* "Show and movie overrides (N)" under the table: a collapsible group (BabelfinUI.disclosure) holding the shared overrides table. The People
+   table's cell rules reach the table inside it, so its alignment and the item names' weight are set again here. */
+.babelfinDashboard .bf-person-overrides { margin: 0.8em 0 0.4em; }
+.babelfinDashboard .bf-person-overrides-list > .bf-btn { margin-top: 0.4em; }
+.babelfinDashboard .bf-table .bfui-overrides th,
+.babelfinDashboard .bf-table .bfui-overrides td { vertical-align: top; }
+.babelfinDashboard .bf-table .bfui-overrides-name { font-weight: 500; }.babelfinDashboard .bf-copy { display: flex; flex-wrap: wrap; align-items: center; gap: 0.6em; margin: 0.4em 0; }
+
+/* Track recognition */
+.babelfinDashboard .bf-kw-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(14em, 1fr)); gap: 0 1.2em; }
+.babelfinDashboard .bf-kw-grid .bf-row { margin: 0.4em 0; }
+
+@media (max-width: 40em) {
+    .babelfinDashboard .bf-select { min-width: 0; width: 100%; }
+    .babelfinDashboard .bf-langdrop { display: flex; }
+    .babelfinDashboard .bf-table th,
+    .babelfinDashboard .bf-table td { padding: 0.4em 0.35em; }
+    .babelfinDashboard .bf-table .bf-cell-action { white-space: normal; }
+    .babelfinDashboard .bf-table .bf-cell-action .bf-btn { margin: 0.15em 0 0.15em 0.4em; }
+
+    /* People: one block per person, so the editor under a person gets the whole width (its own table is left alone) */
+    .babelfinDashboard .bf-people,
+    .babelfinDashboard .bf-people > tbody,
+    .babelfinDashboard .bf-people > tbody > tr,
+    .babelfinDashboard .bf-people > tbody > tr > th,
+    .babelfinDashboard .bf-people > tbody > tr > td { display: block; width: 100%; }
+    .babelfinDashboard .bf-people > thead { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); }
+    .babelfinDashboard .bf-people > tbody > tr { padding: 0.35em 0; border-bottom: 1px solid rgba(255, 255, 255, 0.08); }
+    .babelfinDashboard .bf-people > tbody > tr > th,
+    .babelfinDashboard .bf-people > tbody > tr > td { border-bottom: 0; padding: 0.1em 0.35em; }
+    .babelfinDashboard .bf-people > tbody > tr > td:empty { display: none; }
+    .babelfinDashboard .bf-people > tbody > tr > td[data-label]::before { content: attr(data-label) ": "; opacity: 0.7; }
+    .babelfinDashboard .bf-people > tbody > tr > .bf-cell-action { text-align: left; }
+    .babelfinDashboard .bf-people > tbody > tr > .bf-cell-action .bf-btn { margin-left: 0; }
+    .babelfinDashboard .bf-people > tbody > .bf-editor-row > td { padding: 0.4em 0.35em 1em; }
+
+    /* Apps, language codes, Check a title and Activity: one block per row, each value labelled */
+    .babelfinDashboard .bf-stack,
+    .babelfinDashboard .bf-stack > tbody,
+    .babelfinDashboard .bf-stack > tbody > tr,
+    .babelfinDashboard .bf-stack > tbody > tr > th,
+    .babelfinDashboard .bf-stack > tbody > tr > td { display: block; width: 100%; }
+    .babelfinDashboard .bf-stack > thead { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); }
+    .babelfinDashboard .bf-stack > tbody > tr { padding: 0.4em 0; border-bottom: 1px solid rgba(255, 255, 255, 0.08); }
+    .babelfinDashboard .bf-stack > tbody > tr > th,
+    .babelfinDashboard .bf-stack > tbody > tr > td { border-bottom: 0; padding: 0.1em 0.35em; }
+    .babelfinDashboard .bf-stack > tbody > tr > .bf-cell-action { text-align: left; }
+    .babelfinDashboard .bf-stack > tbody > tr > .bf-cell-action .bf-btn { margin-left: 0; }
+    .babelfinDashboard .bf-stack > tbody > tr > td[data-label]::before { content: attr(data-label) ": "; opacity: 0.7; }
+    .babelfinDashboard .bf-stack > tbody > tr > :first-child { font-weight: 500; }
+    .babelfinDashboard .bf-stack > tbody > tr > td[data-label] > .bf-select,
+    .babelfinDashboard .bf-stack > tbody > tr > td[data-label] > .bf-input { display: block; margin-top: 0.2em; }
+    .babelfinDashboard .bf-check-name { min-width: 0; }
+    .babelfinDashboard .bf-why summary { white-space: normal; display: inline; }
+}
+
+.bf-conflict { border: 2px solid #dfad45; border-radius: .4em; padding: 1em; margin: 1em 0; background: #332b19; color: #fff; }
+
+.bfui .bf-conflict, .bfui.bf-conflict { background: var(--jf-palette-background-paper, #332b19); color: var(--jf-palette-text-primary, #fff); }
+.bfui .bf-conflict p, .bfui.bf-conflict p { color: inherit; overflow-wrap: anywhere; }
+.bfui .bf-conflict .bfui-btn, .bfui.bf-conflict .bfui-btn { color: inherit; background: transparent; border-color: currentColor; }
