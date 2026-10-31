@@ -18,9 +18,11 @@ Settings and diagnostic routes require authentication. A `Me` route always acts 
 | `GET Me/Activity?limit={count}&kind={optionalKind}` | The person's activity since Jellyfin last started, newest first, from the shared 5,000-entry memory ring. Default 50, maximum 200 per request. |
 | `GET Me/Export` | Export personal settings. |
 | `POST Me/Import` | Validate and import a personal export. |
-| `POST Me/Reset` | Remove personal preferences and restore supported Jellyfin settings. |
+| `POST Me/Reset` | Remove personal preferences. `HandleNextEpisode` returns to its default, `true`. |
 
 The existing JSON field names `Understood` and `Reads` mean **My languages** and **Languages for subtitles**. Language codes are listed by `GET Languages`. Keep codes from that catalogue rather than translating them.
+
+`HandleNextEpisode` defaults to `true`. While it is `true` and Babelfin is enabled for the server and the person, Babelfin turns off the person's Jellyfin `RememberAudioSelections` and `RememberSubtitleSelections` (**Set audio track based on previous item** and **Set subtitle track based on previous item**) and records their values; setting it to `false` writes the recorded values back. A person document stored with an older `SchemaVersion` is upgraded when first read or imported, and that upgrade sets `HandleNextEpisode` to `true` once; a later `false` is kept.
 
 Genre rows match one positive genre name and set audio/subtitle table fields. Other stored rule shapes are retained for backup compatibility and remain inactive.
 

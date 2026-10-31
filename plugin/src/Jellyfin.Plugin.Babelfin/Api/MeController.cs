@@ -62,7 +62,8 @@ namespace Jellyfin.Plugin.Babelfin.Api;
 /// lock is taken (<see cref="IPersonStore.Update"/>), not a copy read earlier, so an override removed, a "remove all" or a track change recorded meanwhile is neither undone nor
 /// lost. The change is pure; the item and id checks (library lookups), the activity entry, the remember flags and the resolver's cache are dealt with outside the lock.</item>
 /// <item><c>POST Me/Reset</c> seeds afresh from Jellyfin (the new-user template is not re-applied) and keeps the admin's locks. It also keeps the record
-/// of Jellyfin settings Babelfin changed until they are restored (the fresh document has "handle next-episode tracks" off, so they are restored at once).</item>
+/// of Jellyfin settings Babelfin changed. The fresh document has "handle next-episode tracks" on, its default, so the remember flags stay off (or are
+/// turned off when they were on).</item>
 /// <item>a save that turns "let Babelfin handle next-episode tracks" on applies it (<see cref="IRememberFlags.ApplyAsync"/>); one that turns it off restores
 /// the person's Jellyfin flags. A save that leaves the switch on while no record exists (an earlier apply failed) applies again. Every save writes a
 /// <c>settings-changed</c> activity entry for the person (no paths; item names only for items the person can see).</item>
@@ -262,7 +263,6 @@ public class MeController : ControllerBase
             stored = current;
             fresh.Locks = current?.Locks?.Clone() ?? new SettingsLayer();
             fresh.JellyfinChanges = current?.JellyfinChanges?.Clone();
-            fresh.HandleNextEpisode = false;
             return fresh;
         });
         Record(user, "You reset your Babelfin settings");

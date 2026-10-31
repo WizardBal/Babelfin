@@ -181,6 +181,88 @@ public class ConfigUpgradeTests
         Assert.Equal(AppModeKind.ReplaceOnAutoplay, new PluginConfiguration().FindAppMode("Jellyfin Desktop")!.Mode);
     }
 
+    // The Android app reports itself as "Jellyfin for Android". A missing row is added as shipped; a row that was only discovered
+    // (with the mode for unknown apps) becomes the shipped row and keeps when it was seen; an admin's row is kept.
+    [Fact]
+    public void FreshInstall_ShipsJellyfinForAndroidBesideJellyfinAndroid()
+    {
+        var config = new PluginConfiguration();
+        Assert.Equal(AppModeKind.ReplaceOnAutoplay, config.FindAppMode("Jellyfin for Android")!.Mode);
+        Assert.Equal(AppModeKind.ReplaceOnAutoplay, config.FindAppMode("Jellyfin Android")!.Mode);
+        Assert.True(config.RemembersPrePlayChoices("Jellyfin for Android"));
+    }
+
+    [Fact]
+    public void FromVersion8_AddsTheJellyfinForAndroidRow()
+    {
+        var config = new PluginConfiguration { ConfigVersion = 8 };
+        config.AppModes.RemoveAll(a => a.Client == "Jellyfin for Android");
+        var others = config.AppModes.Count;
+
+        Assert.True(config.Upgrade());
+
+        var row = Assert.Single(config.AppModes, a => a.Client == "Jellyfin for Android");
+        Assert.Equal(AppModeKind.ReplaceOnAutoplay, row.Mode);
+        Assert.False(row.SeenOnly);
+        Assert.Null(row.RememberPrePlayChoices);
+        Assert.Equal(others + 1, config.AppModes.Count);
+        Assert.Equal(PluginConfiguration.CurrentVersion, config.ConfigVersion);
+    }
+
+    [Theory]
+    [InlineData(AppModeKind.Trust)]
+    [InlineData(AppModeKind.ReplaceUnlessManual)]
+    public void FromVersion8_ADiscoveredJellyfinForAndroidRowBecomesTheShippedRow(AppModeKind unknownAppMode)
+    {
+        var seen = new System.DateTime(2026, 10, 30, 11, 22, 38, System.DateTimeKind.Utc);
+        var config = new PluginConfiguration { ConfigVersion = 8, UnknownAppMode = unknownAppMode };
+        config.AppModes.RemoveAll(a => a.Client == "Jellyfin for Android");
+        Assert.True(config.NoteAppSeen("Jellyfin for Android", seen));
+        Assert.Equal(unknownAppMode, config.FindAppMode("Jellyfin for Android")!.Mode);
+
+        config.Upgrade();
+
+        var row = Assert.Single(config.AppModes, a => a.Client == "Jellyfin for Android");
+        Assert.Equal(AppModeKind.ReplaceOnAutoplay, row.Mode);
+        Assert.False(row.SeenOnly);
+        Assert.True(row.Seen);
+        Assert.Equal(seen, row.LastSeen);
+        Assert.True(config.RemembersPrePlayChoices("Jellyfin for Android"));
+        Assert.Equal(unknownAppMode, config.UnknownAppMode);
+    }
+
+    [Theory]
+    [InlineData(AppModeKind.Trust, false)]
+    [InlineData(AppModeKind.ReplaceUnlessManual, true)]
+    [InlineData(AppModeKind.ReplaceOnAutoplay, false)]
+    public void FromVersion8_AnAdminsJellyfinForAndroidRowIsKept(AppModeKind mode, bool remember)
+    {
+        var config = new PluginConfiguration { ConfigVersion = 8 };
+        config.AppModes.RemoveAll(a => a.Client == "Jellyfin for Android");
+        config.AppModes.Add(new AppMode { Client = "Jellyfin for Android", Mode = mode, Seen = true, RememberPrePlayChoices = remember });
+
+        config.Upgrade();
+
+        var row = Assert.Single(config.AppModes, a => a.Client == "Jellyfin for Android");
+        Assert.Equal(mode, row.Mode);
+        Assert.Equal(remember, row.RememberPrePlayChoices);
+        Assert.False(row.SeenOnly);
+    }
+
+    [Fact]
+    public void CurrentVersion_LeavesALaterDiscoveredJellyfinForAndroidRowAlone()
+    {
+        var config = new PluginConfiguration { ConfigVersion = PluginConfiguration.CurrentVersion };
+        config.AppModes.RemoveAll(a => a.Client == "Jellyfin for Android");
+        Assert.True(config.NoteAppSeen("Jellyfin for Android", new System.DateTime(2026, 10, 30, 0, 0, 0, System.DateTimeKind.Utc)));
+
+        Assert.False(config.Upgrade());
+
+        var row = Assert.Single(config.AppModes, a => a.Client == "Jellyfin for Android");
+        Assert.True(row.SeenOnly);
+        Assert.Equal(AppModeKind.Trust, row.Mode);
+    }
+
     [Fact]
     public void CurrentVersion_IsLeftAlone()
     {

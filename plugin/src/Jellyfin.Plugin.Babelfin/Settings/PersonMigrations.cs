@@ -47,7 +47,7 @@ public class RetiredPersonSettings
     }).ToList();
 }
 
-/// <summary>Schema 2/3 migrations. The store backs up the original before invoking this on a loaded document.</summary>
+/// <summary>Schema 2–4 migrations. The store backs up the original before invoking this on a loaded document.</summary>
 public static class PersonMigrations
 {
     // The shared genre component caps visible rows at 100 (the general API rule limit is 200).
@@ -65,7 +65,9 @@ public static class PersonMigrations
         // Capture order before schema 2's archive classification separates table rows from rows with extras.
         var legacyOrder = person.SchemaVersion < 2 ? person.SmartRules.Select(r => r.Clone()).ToArray() : null;
         if (person.SchemaVersion < 2) UpgradeLegacy(person);
-        ActivateGenreRows(person.SmartRules, person.Retired.GenreRules, person.Retired.Rules, person.MigrationNotes, legacyOrder);
+        if (person.SchemaVersion < 3) ActivateGenreRows(person.SmartRules, person.Retired.GenreRules, person.Retired.Rules, person.MigrationNotes, legacyOrder);
+        // Schema 4 turns the next-episode switch on once: earlier documents stored false by default. A false saved after this migration is kept.
+        if (person.SchemaVersion < 4) person.HandleNextEpisode = true;
         person.SchemaVersion = PersonSettings.CurrentSchemaVersion;
         return true;
     }

@@ -676,8 +676,8 @@ using (var sp = BuildDecorated())
     Save("person-ViewerOne-seeded.json", Encoding.UTF8.GetBytes(text));
     Check(doc is not null && doc.Seed is not null && doc.Seed.Assumed.Any(a => a.Field == "Understood" && a.Language == "en" && a.From == "server") && doc.Seed.Assumed.Any(a => a.Field == "Reads" && a.From == "server"),
         $"first decision seeds the person: understood and read 'en' assumed from the server's metadata language ({string.Join(", ", doc?.Seed?.Assumed.Select(a => a.Field + "=" + a.Language + "@" + a.From) ?? Array.Empty<string>())})");
-    Check(text.Contains("\"schemaVersion\": 3") && text.Contains("\"from\": \"server\"") && text.Contains("\"userName\": \"ViewerOne\"") && !Directory.GetFiles(usersFolder, "*.tmp").Any() && NoPaths(text),
-        "the file carries schema 2, the user name and the assumed languages; no temp file remains; no path inside");
+    Check(text.Contains($"\"schemaVersion\": {PersonSettings.CurrentSchemaVersion}") && text.Contains("\"from\": \"server\"") && text.Contains("\"userName\": \"ViewerOne\"") && !Directory.GetFiles(usersFolder, "*.tmp").Any() && NoPaths(text),
+        "the file carries the current schema, the user name and the assumed languages; no temp file remains; no path inside");
 
     SetConfig("jpn", "eng");
     var before = msm.GetStaticMediaSources(slv, true, viewerOne)[0];
@@ -725,11 +725,12 @@ Section("E. Settings upgrade from version 1");
     xs.SerializeToStream(cfg, ms);
     var xml = Encoding.UTF8.GetString(ms.ToArray());
     Save("config-upgraded.xml", ms.ToArray());
-    Check(changed && cfg.ConfigVersion == 8 && cfg.Enabled && !cfg.DryRun && cfg.LastUpgradeNote.Length == 0 && cfg.ProbeAudioLanguage is null && !cfg.Starter.Enabled,
-        "version 1 with the probe fields -> version 7 in one go, Enabled kept, probe retired, the original-language rule off, no upgrade note shown");
-    Check(!xml.Contains("Probe") && !xml.Contains("ReplaceRequestIndices") && xml.Contains("<ConfigVersion>8</ConfigVersion>") && cfg.UnknownAppMode == AppModeKind.Trust && cfg.AppModes.Count >= 5,
-        "the saved file has no retired elements; unknown apps trust; the shipped per-app rows are present");
-    Check(!cfg.Upgrade() && cfg.ConfigVersion == 8, "a second upgrade changes nothing");
+    Check(changed && cfg.ConfigVersion == PluginConfiguration.CurrentVersion && cfg.Enabled && !cfg.DryRun && cfg.LastUpgradeNote.Length == 0 && cfg.ProbeAudioLanguage is null && !cfg.Starter.Enabled,
+        "version 1 with the probe fields -> the current version in one go, Enabled kept, probe retired, the original-language rule off, no upgrade note shown");
+    Check(!xml.Contains("Probe") && !xml.Contains("ReplaceRequestIndices") && xml.Contains($"<ConfigVersion>{PluginConfiguration.CurrentVersion}</ConfigVersion>") && cfg.UnknownAppMode == AppModeKind.Trust && cfg.AppModes.Count >= 5
+        && cfg.FindAppMode("Jellyfin for Android")?.Mode == AppModeKind.ReplaceOnAutoplay,
+        "the saved file has no retired elements; unknown apps trust; the shipped per-app rows are present, \"Jellyfin for Android\" among them");
+    Check(!cfg.Upgrade() && cfg.ConfigVersion == PluginConfiguration.CurrentVersion, "a second upgrade changes nothing");
     {
         // XmlSerializer appends a file's list to a property's default list: a plain round trip doubles the keyword and per-app lists; Upgrade() (every load) repairs it.
         var fresh3 = new PluginConfiguration { ConfigVersion = 3 };
@@ -764,12 +765,12 @@ Section("E. Settings upgrade from version 1");
     const string V2 = "<?xml version=\"1.0\"?><PluginConfiguration><ConfigVersion>2</ConfigVersion><Enabled>true</Enabled><ReplaceRequestIndices>true</ReplaceRequestIndices><Everyday><FetchMissing>false</FetchMissing></Everyday></PluginConfiguration>";
     var cfg2 = (PluginConfiguration)xs.DeserializeFromBytes(typeof(PluginConfiguration), Encoding.UTF8.GetBytes(V2));
     var changed2 = cfg2.Upgrade();
-    Check(changed2 && cfg2.ConfigVersion == 8 && cfg2.UnknownAppMode == AppModeKind.ReplaceUnlessManual && cfg2.AppModes.All(a => a.Mode == AppModeKind.ReplaceUnlessManual) && cfg2.LastUpgradeNote.Length == 0,
+    Check(changed2 && cfg2.ConfigVersion == PluginConfiguration.CurrentVersion && cfg2.UnknownAppMode == AppModeKind.ReplaceUnlessManual && cfg2.AppModes.All(a => a.Mode == AppModeKind.ReplaceUnlessManual) && cfg2.LastUpgradeNote.Length == 0,
         "version 2 with the replace switch on upgrades: every app replaces unless manual; the retired subtitle-download field is ignored");
     const string V3 = "<?xml version=\"1.0\"?><PluginConfiguration><ConfigVersion>3</ConfigVersion><Enabled>true</Enabled><Starter><Enabled>true</Enabled></Starter><Everyday><AudioChain><AudioStepSetting><Kind>OriginalLanguage</Kind></AudioStepSetting><AudioStepSetting><Kind>Language</Kind><Language>en</Language></AudioStepSetting></AudioChain><IfNothingMatches>PartialInMyLanguage</IfNothingMatches></Everyday><Libraries><LibraryDefault><LibraryId>abc</LibraryId><Name>Anime</Name><OriginalAudio>Yes</OriginalAudio><Settings><AudioChain><AudioStepSetting><Kind>Language</Kind><Language>ja</Language></AudioStepSetting></AudioChain><UnlabelledAudio>SpecificLanguage</UnlabelledAudio><UnlabelledAudioLanguage>ja</UnlabelledAudioLanguage></Settings></LibraryDefault></Libraries></PluginConfiguration>";
     var cfg3 = (PluginConfiguration)xs.DeserializeFromBytes(typeof(PluginConfiguration), Encoding.UTF8.GetBytes(V3));
     var changed3 = cfg3.Upgrade();
-    Check(changed3 && cfg3.ConfigVersion == 8 && !cfg3.Starter.Enabled && cfg3.Everyday.AudioChain is null && cfg3.Everyday.IfNothingMatches is null
+    Check(changed3 && cfg3.ConfigVersion == PluginConfiguration.CurrentVersion && !cfg3.Starter.Enabled && cfg3.Everyday.AudioChain is null && cfg3.Everyday.IfNothingMatches is null
         && cfg3.Libraries.Single().Settings.IsEmpty && cfg3.Libraries.Single().OriginalAudio == OriginalAudioChoice.Yes && cfg3.PerLibraryDefaults is null,
         "version 3 -> current version: the server-wide audio defaults, the original-language rule and the settings the page no longer shows are cleared; the library list is kept");
     var freshInstall = new PluginConfiguration();
@@ -2080,14 +2081,14 @@ Section("I. Reset all settings");
         "afterwards GET Admin/Settings is exactly GET Admin/Defaults (the shipped settings)");
 
     var fresh = personStore.UserIds().Where(id => users.GetUserById(id) is not null).Select(id => personStore.TryGet(id)).ToList();
-    Check(fresh.Count == resettable && fresh.All(d => d is { Overrides.Count: 0, Libraries.Count: 0, SmartRules.Count: 0, CollectionOrder.Count: 0, BurnedIn.Count: 0, PerLibrary: null, HandleNextEpisode: false, Enabled: true, Locks.IsEmpty: true } && d.Seed is not null),
-        "every person is a fresh seed: no overrides, library rows, rules or locks, the table mode automatic, 'handle next-episode tracks' off");
+    Check(fresh.Count == resettable && fresh.All(d => d is { Overrides.Count: 0, Libraries.Count: 0, SmartRules.Count: 0, CollectionOrder.Count: 0, BurnedIn.Count: 0, PerLibrary: null, HandleNextEpisode: true, Enabled: true, Locks.IsEmpty: true } && d.Seed is not null),
+        "every person is a fresh seed: no overrides, library rows, rules or locks, the table mode automatic, 'handle next-episode tracks' on, its default");
     var viewerOneAfter = Node(await Send(h, HttpMethod.Get, $"/Babelfin/Admin/Users/{viewerOne.Id:N}/Settings", admin));
     Check(viewerOneAfter["overrides"]!.AsArray().Count == 0 && viewerOneAfter["libraries"]!.AsArray().Count == 0 && viewerOneAfter["perLibrary"] is null && viewerOneAfter["locks"]?["isEmpty"]?.GetValue<bool>() == true
         && viewerOneAfter["everyday"]!["understood"]!.AsArray().Single()!.GetValue<string>() == "en",
         "GET Admin/Users/{id}/Settings for ViewerOne: the seeded document ('en' assumed from the server) and nothing else");
-    Check(viewerOne.RememberAudioSelections && viewerOne.RememberSubtitleSelections && personStore.TryGet(viewerOne.Id)?.JellyfinChanges is null,
-        "ViewerOne's Jellyfin remember flags, which Babelfin had turned off, are back on and the record is cleared");
+    Check(!viewerOne.RememberAudioSelections && !viewerOne.RememberSubtitleSelections && personStore.TryGet(viewerOne.Id)?.JellyfinChanges is { RememberAudioSelections: true, RememberSubtitleSelections: true },
+        "ViewerOne's Jellyfin remember flags, which Babelfin had turned off, stay off and the record of his original values is kept, because the reset leaves 'handle next-episode tracks' on");
     Check(personStore.TryGet(ghostId)?.Everyday.Understood?.SequenceEqual(new[] { "fr" }) == true, "the file of a user who no longer exists is left as it was");
     var entries = Node(await Send(h, HttpMethod.Get, "/Babelfin/Admin/Activity?kind=settings-changed&limit=50", admin)).AsArray();
     Check(entries.Any(e => e!["text"]?.GetValue<string>() == "An admin reset all Babelfin settings" && e["userId"] is null)
@@ -2112,7 +2113,7 @@ Section("I. Reset all settings");
     Check(restore.Status == 200 && Node(restore)["applied"]!.GetValue<bool>() && restoredSettings.Text.Contains("harness-word")
         && Node(restoredSettings)["everyday"]?["unlabelledAudioLanguage"]?.GetValue<string>() == "ja"
         && viewerOneRestored is { HandleNextEpisode: true, Libraries.Count: 1, Overrides.Count: 1, Locks.Format: FormatPreference.TextOnly } && !viewerOne.RememberAudioSelections,
-        $"POST Admin/Import takes the first backup as it is and puts everything back: the admin settings, ViewerOne's lock, library row and override, and his remember flags off again ({restore.Status})");
+        $"POST Admin/Import takes the first backup as it is and puts everything back: the admin settings, ViewerOne's lock, library row and override, and his remember flags still off ({restore.Status})");
     var viewerTwoRestored = personStore.TryGet(viewerTwo.Id);
     var viewerTwoRow = restore.Status == 200 ? Node(restore)["users"]!.AsArray().FirstOrDefault(u => Guid.Parse(u!["userId"]!.GetValue<string>()) == viewerTwo.Id) : null;
     Check(viewerTwoRow?["action"]?.GetValue<string>() == "update" && viewerTwoRestored is { Overrides.Count: 601 } && JsonSerializer.Serialize(viewerTwoRestored.Overrides, BabelfinJson.Options) == viewerTwoManyJson,

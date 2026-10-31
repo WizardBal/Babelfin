@@ -206,7 +206,7 @@ public static class PlaybackChecks
                 "A picker served to another device never becomes this device's remembered show choice");
             Restore();
 
-            // (4) Jellyfin Web replaces on autoplay: the previous item stopped within the window and the copied tracks disagree.
+            // (4) Jellyfin Web replaces on autoplay: the previous item stopped within the window and the copied tracks differ.
             var s4 = NewSession("Jellyfin Web");
             sessions.RaiseStopped(s4, episode, user);
             var r4 = await Post(otherEpisode, "?audioStreamIndex=1&subtitleStreamIndex=3", "Jellyfin Web", s4.DeviceId);
@@ -245,15 +245,18 @@ public static class PlaybackChecks
                 $"H5 an unknown client is added to the per-app table as seen ({row?.Client}, {row?.Mode}, seen {row?.Seen}, last {row?.LastSeen:O})");
             Restore();
 
-            // (6) A subtitle change in a progress report after the window is remembered as "subtitles off"; at 2 s it is not.
+            // (6) A subtitle change in a progress report after the window is remembered as "subtitles off" once it has stayed selected for the settle period; at 2 s it is not.
             var s7 = NewSession("Jellyfin Web");
             await Post(episode, string.Empty, "Jellyfin Web", s7.DeviceId);
             sessions.RaiseStart(s7, episode, user, 2, 4);
             Backdate(s7, 6);
             sessions.RaiseProgress(s7, episode, user, 2, -1);
+            check(Manual() is null, "H6 progress 6 s after start with subtitles turned off: held, not remembered until it has stayed selected for the settle period");
+            registry.UpdateExisting(s7.Id, r => r.PendingSubtitle = r.PendingSubtitle! with { Since = r.PendingSubtitle.Since - PlaybackMonitor.SettlePeriod });
+            sessions.RaiseProgress(s7, episode, user, 2, -1);
             var m7 = Manual();
             check(m7 is { SubtitlesOff: true, Subtitle: null } && EntryFor(s7.Id) is { ManualChanged: true } && sessions.Commands.All(c => c.SessionId != s7.Id),
-                $"H6 progress 6 s after start with subtitles turned off: remembered as subtitles off for the series (off {m7?.SubtitlesOff})");
+                $"H6 a later progress report after the settle period still shows subtitles off: remembered as subtitles off for the series (off {m7?.SubtitlesOff})");
             Restore();
             var s8 = NewSession("Jellyfin Web");
             await Post(episode, string.Empty, "Jellyfin Web", s8.DeviceId);

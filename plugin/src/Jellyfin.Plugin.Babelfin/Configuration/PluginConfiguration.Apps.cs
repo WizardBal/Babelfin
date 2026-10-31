@@ -21,7 +21,7 @@ public partial class PluginConfiguration
 
     /// <summary>The shipped jellyfin-web family; other apps need an explicit opt-in.</summary>
     public static bool ShippedRememberPrePlayChoices(string? client)
-        => client?.Trim().ToUpperInvariant() is "JELLYFIN WEB" or "JELLYFIN MEDIA PLAYER" or "JELLYFIN DESKTOP" or "JELLYFIN ANDROID";
+        => client?.Trim().ToUpperInvariant() is "JELLYFIN WEB" or "JELLYFIN MEDIA PLAYER" or "JELLYFIN DESKTOP" or "JELLYFIN ANDROID" or "JELLYFIN FOR ANDROID";
 
     /// <summary>Updates discovery metadata without changing admin rows or exceeding the validator's limits. Caller serializes and saves.</summary>
     public bool NoteAppSeen(string? client, DateTime now)

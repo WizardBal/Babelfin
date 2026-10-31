@@ -66,7 +66,7 @@ public sealed class SettingsRecoveryAndConflictTests
     public async Task ExpectedValuesAreComparedInsideUpdateAndDifferentFieldsMerge()
     {
         var store = new ApiSafetyStore(); var person = ApiSafetyHost.Person();
-        store.Inner.Save(new PersonSettings { UserId = person.Id, Enabled = true });
+        store.Inner.Save(new PersonSettings { UserId = person.Id, Enabled = true, HandleNextEpisode = false });
         var controller = Admin(store, person);
         controller.Request.Headers["X-Babelfin-Expected"] = Expected(new { enabled = true });
         store.BeforeUpdate = () => store.Inner.Update(person.Id, current => { var copy = current!.Clone(); copy.Enabled = false; return copy; });
@@ -385,7 +385,7 @@ public sealed class SettingsRecoveryAndConflictTests
     {
         using var host = new LocalStorageTestHost(); var store = host.Store; var id = Guid.NewGuid();
         Directory.CreateDirectory(Path.GetDirectoryName(store.FilePath(id))!);
-        File.WriteAllText(store.FilePath(id), "{\"schemaVersion\":3,\"libraries\":[{\"libraryId\":\"invalid\"}]}");
+        File.WriteAllText(store.FilePath(id), "{\"schemaVersion\":" + PersonSettings.CurrentSchemaVersion + ",\"libraries\":[{\"libraryId\":\"invalid\"}]}");
         var original = File.ReadAllBytes(store.FilePath(id));
         Assert.Empty(store.TryGet(id)!.Libraries);
         Assert.Empty(host.Store.TryGet(id)!.Libraries);

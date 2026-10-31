@@ -2097,7 +2097,7 @@
                 const initial = enumName('AppModeKind', app.Mode) || 'Trust';
                 const sel = dropdown(modeChoices, initial, t('apps.mode') + ' · ' + app.Client);
                 const rememberInitial = typeof app.RememberPrePlayChoices === 'boolean' ? app.RememberPrePlayChoices
-                    : /^(jellyfin web|jellyfin media player|jellyfin desktop|jellyfin android)$/i.test(app.Client);
+                    : /^(jellyfin web|jellyfin media player|jellyfin desktop|jellyfin android|jellyfin for android)$/i.test(app.Client);
                 const remember = h('input', { type: 'checkbox', checked: rememberInitial, 'aria-label': t('apps.rememberPrePlay') + ' · ' + app.Client });
                 const tr = h('tr', null, [h('th', { scope: 'row' }, [h('span', { text: app.Client }), fieldErrorBox()]), h('td', { 'data-label': t('apps.mode') }, sel), h('td', { 'data-label': t('apps.rememberPrePlay') }, remember)]);
                 const rememberChanged = function () {
@@ -2114,7 +2114,7 @@
                 S.restorers.push(function (shipped) {
                     const row = (shipped.AppModes || []).find(function (a) { return a && String(a.Client).trim().toLowerCase() === String(app.Client).trim().toLowerCase(); });
                     remember.checked = row && typeof row.RememberPrePlayChoices === 'boolean' ? row.RememberPrePlayChoices
-                        : /^(jellyfin web|jellyfin media player|jellyfin desktop|jellyfin android)$/i.test(app.Client);
+                        : /^(jellyfin web|jellyfin media player|jellyfin desktop|jellyfin android|jellyfin for android)$/i.test(app.Client);
                     rememberChanged();
                 });
                 const changed = function () {
@@ -2193,7 +2193,7 @@
             Enabled: true,
             UseEverydayEverywhere: false,
             PerLibrary: null,
-            HandleNextEpisode: false,
+            HandleNextEpisode: true,
             Everyday: {},
             Libraries: [],
             SmartRules: [],

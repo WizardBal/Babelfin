@@ -59,6 +59,28 @@ public sealed class BackupInteroperabilityTests(ITestOutputHelper output)
         Assert.Null(plugin.Configuration.NewUserTemplate);
     }
 
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public void TemplateStoredBeforeSchemaFourCollapsesWhenOnlyItsLanguagesAreCleared(bool otherChoice)
+    {
+        using var host = new LocalStorageTestHost();
+        var stored = new PersonSettings { SchemaVersion = 3, HandleNextEpisode = false, Everyday = new SettingsLayer { Understood = new[] { "en" } } };
+        if (otherChoice) stored.Everyday.Format = Jellyfin.Plugin.Babelfin.Engine.Selection.FormatPreference.TextOnly;
+        var plugin = host.CreatePlugin(new PluginConfiguration { ConfigVersion = PluginConfiguration.CurrentVersion, NewUserTemplate = stored });
+        var response = ApiSafetyHost.Admin(host.Store).PutSettings(new PluginConfiguration(), "newUserTemplate.everyday.understood");
+        Assert.IsType<OkObjectResult>(response.Result);
+        if (otherChoice)
+        {
+            Assert.Equal(Jellyfin.Plugin.Babelfin.Engine.Selection.FormatPreference.TextOnly, plugin.Configuration.NewUserTemplate!.Everyday.Format);
+            Assert.Null(plugin.Configuration.NewUserTemplate.Everyday.Understood);
+        }
+        else
+        {
+            Assert.Null(plugin.Configuration.NewUserTemplate);
+        }
+    }
+
     [Fact]
     public async Task QuarantineOmissionSurvivesRepeatedExportsRestartAndStrictResetUntilRepaired()
     {

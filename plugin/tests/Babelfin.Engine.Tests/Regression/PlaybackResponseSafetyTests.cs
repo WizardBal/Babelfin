@@ -23,6 +23,7 @@ using MediaBrowser.Controller.Session;
 using MediaBrowser.Model.Dto;
 using MediaBrowser.Model.Entities;
 using MediaBrowser.Model.Serialization;
+using MediaBrowser.Model.Session;
 using Microsoft.AspNetCore.Http;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.AspNetCore.Mvc.Controllers;
@@ -114,6 +115,92 @@ public sealed class PlaybackResponseSafetyTests : IDisposable
             Assert.Equal("en", remembered.Manual!.Audio!.Language);
         }
         else Assert.Empty(fixture.Store.TryGet(fixture.User.Id)!.Overrides);
+    }
+
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task TheNextItemFetchedRightBeforeAnAutoplayRequestIsNotAPickerChoice(bool servedBeforeTheStopToo)
+    {
+        var fixture = Create();
+        if (servedBeforeTheStopToo) fixture.ServeAt(T0.AddSeconds(-600));
+        fixture.StopOtherItem(T0.AddSeconds(-2));
+        fixture.ServeAt(T0.AddSeconds(-1));
+
+        var context = await fixture.Request("Jellyfin Web", 1);
+
+        Assert.Equal(2, context.ActionArguments["audioStreamIndex"]);
+        Assert.Empty(fixture.Store.TryGet(fixture.User.Id)!.Overrides);
+        Assert.False(fixture.Registry.Get("session")!.ManualChanged);
+    }
+
+    [Fact]
+    public async Task APickerOpenedAndRefetchedDuringTheAutoplayWindowIsStillARememberedChoice()
+    {
+        var fixture = Create();
+        fixture.StopOtherItem(T0.AddSeconds(-30));
+        fixture.ServeAt(T0.AddSeconds(-20));
+        fixture.ServeAt(T0.AddSeconds(-1));
+
+        var context = await fixture.Request("Jellyfin Web", 1);
+
+        Assert.Equal(1, context.ActionArguments["audioStreamIndex"]);
+        var remembered = Assert.Single(fixture.Store.TryGet(fixture.User.Id)!.Overrides);
+        Assert.Equal(OverrideScope.Series, remembered.Scope);
+        Assert.Equal(Ids.N(Ids.Series), remembered.ItemId);
+        Assert.Equal("en", remembered.Manual!.Audio!.Language);
+        Assert.True(fixture.Registry.Get("session")!.ManualChanged);
+    }
+
+    [Fact]
+    public async Task AutoplayCarryingOverASignsAndSongsSubtitleIsReplacedWithTheFullOne()
+    {
+        var fixture = Create();
+        fixture.NewSource = SignsAndSongsSource;
+        fixture.Choice = new TrackDecision(2, 3, Array.Empty<string>());
+        fixture.StopOtherItem(T0.AddSeconds(-2));
+        fixture.ServeAt(T0.AddSeconds(-1));
+
+        var context = await fixture.Request("Jellyfin Web", 2, subtitle: 4);
+
+        Assert.Equal(2, context.ActionArguments["audioStreamIndex"]);
+        Assert.Equal(3, context.ActionArguments["subtitleStreamIndex"]);
+        Assert.Empty(fixture.Store.TryGet(fixture.User.Id)!.Overrides);
+        Assert.False(fixture.Registry.Get("session")!.ManualChanged);
+    }
+
+    // The previous episode's full subtitles carried over by position: the same language and kind, but not Babelfin's track.
+    [Fact]
+    public async Task AutoplayCarryingOverAnotherFullSubtitleOfTheSameLanguageIsReplaced()
+    {
+        var fixture = Create();
+        fixture.NewSource = TwoFullSubtitlesSource;
+        fixture.Choice = new TrackDecision(2, 5, Array.Empty<string>());
+        fixture.StopOtherItem(T0.AddSeconds(-2));
+        fixture.ServeAt(T0.AddSeconds(-1));
+
+        var context = await fixture.Request("Jellyfin Web", 2, subtitle: 3);
+
+        Assert.Equal(2, context.ActionArguments["audioStreamIndex"]);
+        Assert.Equal(5, context.ActionArguments["subtitleStreamIndex"]);
+        Assert.Empty(fixture.Store.TryGet(fixture.User.Id)!.Overrides);
+        Assert.False(fixture.Registry.Get("session")!.ManualChanged);
+        Assert.False(fixture.Registry.Get("session")!.Trusted);
+    }
+
+    [Fact]
+    public async Task OutsideAutoplayTheSameRequestIsTheAppsOwnChoice()
+    {
+        var fixture = Create();
+        fixture.NewSource = TwoFullSubtitlesSource;
+        fixture.Choice = new TrackDecision(2, 5, Array.Empty<string>());
+
+        var context = await fixture.Request("Jellyfin Web", 2, subtitle: 3);
+
+        Assert.Equal(2, context.ActionArguments["audioStreamIndex"]);
+        Assert.Equal(3, context.ActionArguments["subtitleStreamIndex"]);
+        Assert.Empty(fixture.Store.TryGet(fixture.User.Id)!.Overrides);
+        Assert.True(fixture.Registry.Get("session")!.Trusted);
     }
 
     [Theory]
@@ -213,8 +300,11 @@ public sealed class PlaybackResponseSafetyTests : IDisposable
         });
         var context = await fixture.Request("Jellyfin Web", 1);
         Assert.Equal(1, context.ActionArguments["audioStreamIndex"]);
-        Assert.Equal(OverrideScope.Series, Assert.Single(fixture.Store.TryGet(fixture.User.Id)!.Overrides).Scope);
         Assert.True(fixture.Registry.Get("session")!.ManualChanged);
+        Assert.Empty(fixture.Store.TryGet(fixture.User.Id)!.Overrides);
+        fixture.SetTime(T0 + PlaybackMonitor.SettlePeriod);
+        fixture.Report(1, -1);
+        Assert.Equal(OverrideScope.Series, Assert.Single(fixture.Store.TryGet(fixture.User.Id)!.Overrides).Scope);
     }
 
     [Fact]
@@ -288,7 +378,7 @@ public sealed class PlaybackResponseSafetyTests : IDisposable
         if (stopBeforeAdoption)
         {
             fixture.ServeAt(T0.AddSeconds(2));
-            fixture.SetTime(T0.AddSeconds(3));
+            fixture.SetTime(T0.AddSeconds(2) + PlaybackInfoFilter.PickerUseTime);
             await fixture.Request("Jellyfin Web", 1);
             Assert.Equal(1, fixture.Registry.Get("session")!.ExpectedAudio);
             Assert.Single(fixture.Store.TryGet(fixture.User.Id)!.Overrides);
@@ -406,6 +496,29 @@ public sealed class PlaybackResponseSafetyTests : IDisposable
         },
     };
 
+    private static MediaSourceInfo SignsAndSongsSource()
+    {
+        var source = Source();
+        source.MediaStreams = source.MediaStreams.Concat(new[]
+        {
+            new MediaStream { Index = 3, Type = MediaStreamType.Subtitle, Language = "eng", Title = "Full", Codec = "subrip" },
+            new MediaStream { Index = 4, Type = MediaStreamType.Subtitle, Language = "eng", Title = "Signs & Songs", Codec = "subrip" },
+        }).ToList();
+        return source;
+    }
+
+    private static MediaSourceInfo TwoFullSubtitlesSource()
+    {
+        var source = Source();
+        source.MediaStreams = source.MediaStreams.Concat(new[]
+        {
+            new MediaStream { Index = 3, Type = MediaStreamType.Subtitle, Language = "eng", Title = "Full Sub", Codec = "PGSSUB" },
+            new MediaStream { Index = 4, Type = MediaStreamType.Subtitle, Language = "eng", Title = "Signs & Songs", Codec = "ass", IsDefault = true },
+            new MediaStream { Index = 5, Type = MediaStreamType.Subtitle, Language = "eng", Title = "Dialogue", Codec = "ass" },
+        }).ToList();
+        return source;
+    }
+
     private sealed class Fixture
     {
         internal readonly CountingPlugin Plugin;
@@ -418,8 +531,11 @@ public sealed class PlaybackResponseSafetyTests : IDisposable
         internal readonly BabelfinMediaSourceManager Manager;
         internal readonly CallProxy Compatibility;
         internal bool FailDecision;
+        internal TrackDecision Choice = new(2, -1, Array.Empty<string>());
+        internal Func<MediaSourceInfo> NewSource = Source;
         private DateTime _now = T0;
         private readonly Func<PlaybackInfoFilter> _newFilter;
+        private readonly PlaybackMonitor _monitor;
 
         internal Fixture(CountingPlugin plugin)
         {
@@ -434,11 +550,11 @@ public sealed class PlaybackResponseSafetyTests : IDisposable
             var recorder = new TrackChangeRecorder(resolver, Store, activity, NullLogger<TrackChangeRecorder>.Instance);
             var inner = CallProxy.Create<IMediaSourceManager>((method, _) => method.Name switch
             {
-                nameof(IMediaSourceManager.GetStaticMediaSources) => new[] { Source() },
-                nameof(IMediaSourceManager.GetPlaybackMediaSources) => Task.FromResult<IReadOnlyList<MediaSourceInfo>>(new[] { Source() }),
+                nameof(IMediaSourceManager.GetStaticMediaSources) => new[] { NewSource() },
+                nameof(IMediaSourceManager.GetPlaybackMediaSources) => Task.FromResult<IReadOnlyList<MediaSourceInfo>>(new[] { NewSource() }),
                 _ => null,
             }).Proxy;
-            var decider = CallProxy.Create<ITrackDecider>((_, _) => FailDecision ? throw new InvalidOperationException("Test decider failure") : new TrackDecision(2, -1, Array.Empty<string>())).Proxy;
+            var decider = CallProxy.Create<ITrackDecider>((_, _) => FailDecision ? throw new InvalidOperationException("Test decider failure") : Choice).Proxy;
             Manager = new BabelfinMediaSourceManager(inner, decider, Stats, NullLogger.Instance);
             var users = CallProxy.Create<IUserManager>((method, _) => method.Name == nameof(IUserManager.GetUserById) ? User : null).Proxy;
             var library = CallProxy.Create<ILibraryManager>((method, _) => method.Name == nameof(ILibraryManager.GetItemById) ? Item : null).Proxy;
@@ -446,6 +562,7 @@ public sealed class PlaybackResponseSafetyTests : IDisposable
             var compatibility = CallProxy.Create<ICompatibilityWriter>();
             Compatibility = compatibility.Recorder;
             _newFilter = () => new PlaybackInfoFilter(users, library, Manager, Stats, Registry, recorder, sessions, activity, compatibility.Proxy, NullLogger<PlaybackInfoFilter>.Instance);
+            _monitor = new PlaybackMonitor(sessions, Registry, recorder, Manager, users, library, activity, NullLogger<PlaybackMonitor>.Instance, Stats);
         }
 
         internal void SetTime(DateTime time) => _now = time;
@@ -458,7 +575,26 @@ public sealed class PlaybackResponseSafetyTests : IDisposable
             _now = T0;
         }
 
-        internal async Task<ActionExecutingContext> Request(string client, int? audio, string outcome = "success-not-started")
+        internal void Report(int? audio, int? subtitle)
+        {
+            var session = new SessionInfo(null!, NullLogger.Instance)
+            {
+                Id = "session", DeviceId = "device", Client = "Jellyfin Web", UserId = User.Id,
+                PlayState = new PlayerStateInfo { AudioStreamIndex = audio, SubtitleStreamIndex = subtitle, MediaSourceId = "source" },
+            };
+            typeof(PlaybackMonitor).GetMethod("HandleReport", BindingFlags.Instance | BindingFlags.NonPublic)!
+                .Invoke(_monitor, new object?[] { new PlaybackProgressEventArgs { Session = session, Item = Item, MediaSourceId = "source" } });
+        }
+
+        internal void StopOtherItem(DateTime time) => Registry.Update("session", play =>
+        {
+            play.UserId = User.Id;
+            play.Playing = false;
+            play.LastStoppedItemId = Guid.NewGuid();
+            play.LastStoppedAt = time;
+        });
+
+        internal async Task<ActionExecutingContext> Request(string client, int? audio, string outcome = "success-not-started", int? subtitle = null)
         {
             var http = new DefaultHttpContext
             {
@@ -472,6 +608,7 @@ public sealed class PlaybackResponseSafetyTests : IDisposable
             var action = new ActionContext(http, new RouteData(), new ControllerActionDescriptor { ControllerName = "MediaInfo", ActionName = "GetPostedPlaybackInfo" }, new ModelStateDictionary());
             var args = new Dictionary<string, object?> { ["itemId"] = Item.Id };
             if (audio.HasValue) args["audioStreamIndex"] = audio.Value;
+            if (subtitle.HasValue) args["subtitleStreamIndex"] = subtitle.Value;
             var context = new ActionExecutingContext(action, new List<IFilterMetadata>(), args, new object());
             await _newFilter().OnActionExecutionAsync(context, () => outcome switch
             {

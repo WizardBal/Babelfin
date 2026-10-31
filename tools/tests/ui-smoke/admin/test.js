@@ -180,6 +180,7 @@ function shippedConfig() {
             { Client: 'Jellyfin Media Player', Mode: 'ReplaceOnAutoplay', Seen: false, LastSeen: null },
             { Client: 'Jellyfin Desktop', Mode: 'ReplaceOnAutoplay', Seen: false, LastSeen: null },
             { Client: 'Jellyfin Android', Mode: 'ReplaceOnAutoplay', Seen: false, LastSeen: null },
+            { Client: 'Jellyfin for Android', Mode: 'ReplaceOnAutoplay', Seen: false, LastSeen: null },
             { Client: 'Android TV', Mode: 'ReplaceUnlessManual', Seen: false, LastSeen: null },
             { Client: 'Streamyfin', Mode: 'ReplaceUnlessManual', Seen: false, LastSeen: null },
             { Client: 'Swiftfin', Mode: 'Trust', Seen: false, LastSeen: null }
@@ -221,10 +222,10 @@ const VIDEO_ROW = { AudioChain: [{ Kind: 'VideoDefault' }], WhenAudioUnderstood:
 const RESET_FILE = 'reset-example.json';
 const RESET_PATH = 'backups/' + RESET_FILE;
 const RESET_FAILED = "The previous settings couldn't be saved, so nothing was reset.";
-/** A person's file right after Reset all settings: a fresh seed, no Locks, HandleNextEpisode off. */
+/** A person's file right after Reset all settings: a fresh seed, no Locks, HandleNextEpisode on (its default). */
 function freshSeed(id, name) {
     return {
-        SchemaVersion: 1, UserId: id, UserName: name, Enabled: true, UseEverydayEverywhere: false, HandleNextEpisode: false,
+        SchemaVersion: 1, UserId: id, UserName: name, Enabled: true, UseEverydayEverywhere: false, HandleNextEpisode: true,
         Seed: { SeededAt: '2026-10-21T12:00:00Z', Assumed: [{ Field: 'Understood', Language: 'en', From: 'server' }], Confirmed: false, FromTemplate: false },
         Everyday: { Understood: ['en'], Reads: ['en'] }, Libraries: [], SmartRules: [], Overrides: [], CollectionOrder: [], BurnedIn: [], Locks: {}, UpdatedAt: '2026-10-21T12:00:00Z'
     };
@@ -272,9 +273,9 @@ function applyIntent(stored, body, fields) {
             // The backend collapses a default-only template to null, while retaining every hidden nondefault value.
             if (value == null) {
                 const rest = clone(saved.NewUserTemplate);
-                for (const key of ['SchemaVersion', 'UserId', 'UserName']) delete rest[key];
+                for (const key of ['SchemaVersion', 'UserId', 'UserName', 'HandleNextEpisode']) delete rest[key];
                 if (rest.Enabled === true) delete rest.Enabled;
-                for (const key of ['UseEverydayEverywhere', 'HandleNextEpisode']) if (rest[key] === false) delete rest[key];
+                if (rest.UseEverydayEverywhere === false) delete rest.UseEverydayEverywhere;
                 const meaningful = value => value != null && (Array.isArray(value) ? value.length > 0 : typeof value === 'object' ? Object.values(value).some(meaningful) : true);
                 if (!meaningful(rest)) saved.NewUserTemplate = null;
             }

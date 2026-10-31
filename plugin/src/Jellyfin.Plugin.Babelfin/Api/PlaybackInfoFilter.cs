@@ -32,7 +32,7 @@ public enum PlaybackInfoOutcome
     /// <summary>Replace the indices (and, for a single source, the media source id) with Babelfin's choice.</summary>
     Replace,
 
-    /// <summary>Keep the request: it is a manual choice, which is remembered.</summary>
+    /// <summary>Keep the request: it is a manual choice, which is remembered (a change during play once it has settled).</summary>
     Manual,
 }
 
@@ -44,9 +44,8 @@ public enum PlaybackInfoOutcome
 /// <param name="DiffersFromChoice">The request's indices differ from Babelfin's current choice.</param>
 /// <param name="Mode">The app's mode.</param>
 /// <param name="AutoplayWindowHit">The same session's previous (other) item stopped within the autoplay window.</param>
-/// <param name="Disagree">The request's tracks disagree with Babelfin's on language or kind.</param>
 /// <param name="RememberPrePlayChoices">Whether this app's differing pre-play picks may be remembered.</param>
-/// <param name="FreshServedChoice">A served picker newer than the last stop, with no other item still playing, or a request outside autoplay.</param>
+/// <param name="FreshServedChoice">A served picker newer than the last stop and at least <see cref="PlaybackInfoFilter.PickerUseTime"/> before the request, with no other item still playing, or a request outside autoplay.</param>
 public readonly record struct PlaybackInfoFacts(
     bool HasExplicitIndices,
     bool RepeatDuringPlay,
@@ -55,7 +54,6 @@ public readonly record struct PlaybackInfoFacts(
     bool DiffersFromChoice,
     AppModeKind Mode,
     bool AutoplayWindowHit,
-    bool Disagree,
     bool RememberPrePlayChoices = true,
     bool FreshServedChoice = false);
 
@@ -70,9 +68,16 @@ public readonly record struct PlaybackInfoFacts(
 /// <item>"Served" means media sources included in a successful response for this person, item and source. Internal lookups and
 /// simulator results never populate that map; entries expire after 30 minutes.</item>
 /// <item>A repeat during play is considered first. Apps opted into pre-play memory may preserve a fresh served-picker change
-/// before autoplay replacement. Other apps only remember changes made during play.</item>
+/// before autoplay replacement; during autoplay a picker counts as fresh only when served after the previous item stopped and at
+/// least <see cref="PickerUseTime"/> before the request. Other apps only remember changes made during play.</item>
 /// <item>The autoplay window counts only when the stopped item is another item (resuming the same item is not autoplay). A request
 /// for another item while the session still plays one counts too: jellyfin-web asks for the next item before its stop report lands.</item>
+/// <item>In replace-on-autoplay mode, every index inside the autoplay window that differs from Babelfin's choice is replaced, even one
+/// naming a track of the same language and kind: the app copies the previous item's track by position, codec or language, which is
+/// never a person's choice. A person's picks reach the next item through the changes Babelfin remembered for their memory scope.</item>
+/// <item>A manual change during play (a repeat) updates the play's expected tracks at once and is held on the play: the
+/// <see cref="PlaybackMonitor"/> remembers it once it has stayed selected for <see cref="PlaybackMonitor.SettlePeriod"/>. A manual
+/// pre-play choice is remembered at once.</item>
 /// <item>A request that names only one of the two indices is compared on that one; the other stays Babelfin's.</item>
 /// <item>No session yet and no device id: the play is not registered (nothing to key it by); everything else still applies.</item>
 /// <item>Babelfin had nothing to say (plugin or person switched off, nothing decided): the filter stays out entirely.</item>
@@ -86,6 +91,11 @@ public sealed class PlaybackInfoFilter : IAsyncActionFilter
 {
     /// <summary>A request within this long of the play's last progress report is a repeat during play.</summary>
     public static readonly TimeSpan RepeatWindow = TimeSpan.FromMinutes(2);
+
+    /// <summary>During autoplay a served picker supports a fresh pre-play choice only when it was served after the previous item stopped
+    /// and at least this long before the request: jellyfin-web fetches the next item immediately before an autoplay PlaybackInfo
+    /// whose indices are ranked from the previous item's tracks.</summary>
+    public static readonly TimeSpan PickerUseTime = TimeSpan.FromSeconds(5);
 
     private static readonly TimeSpan SeenInterval = TimeSpan.FromHours(1);
     private static readonly ConcurrentDictionary<string, DateTime> SeenMarks = new(StringComparer.OrdinalIgnoreCase);
@@ -147,7 +157,8 @@ public sealed class PlaybackInfoFilter : IAsyncActionFilter
 
     /// <summary>
     /// No indices are trusted. In-play repeats compare with expected indices. An opted-in app's fresh pre-play choice is
-    /// remembered before autoplay replacement; otherwise the app mode determines replacement or trust.
+    /// remembered before autoplay replacement. Otherwise indices that differ from Babelfin's choice are replaced in
+    /// replace-unless-manual mode and, inside the autoplay window, in replace-on-autoplay mode; all others are trusted.
     /// </summary>
     /// <param name="facts">The facts.</param>
     /// <returns>The outcome.</returns>
@@ -174,12 +185,9 @@ public sealed class PlaybackInfoFilter : IAsyncActionFilter
             return PlaybackInfoOutcome.Trust;
         }
 
-        if (facts.Mode == AppModeKind.ReplaceOnAutoplay && facts.AutoplayWindowHit)
-        {
-            return facts.Disagree ? PlaybackInfoOutcome.Replace : PlaybackInfoOutcome.Trust;
-        }
-
-        return facts.Mode == AppModeKind.ReplaceUnlessManual ? PlaybackInfoOutcome.Replace : PlaybackInfoOutcome.Trust;
+        return facts.Mode == AppModeKind.ReplaceUnlessManual || (facts.Mode == AppModeKind.ReplaceOnAutoplay && facts.AutoplayWindowHit)
+            ? PlaybackInfoOutcome.Replace
+            : PlaybackInfoOutcome.Trust;
     }
 
     /// <summary>Whether requested indices differ from a reference choice; only the indices present in the request are compared (a subtitle below 0 is "off").</summary>
@@ -386,9 +394,8 @@ public sealed class PlaybackInfoFilter : IAsyncActionFilter
             differsFromChoice,
             mode,
             autoplay,
-            differsFromChoice && TrackComparer.Disagree(source, askedAudio ?? choiceAudio, askedSubtitle ?? choiceSubtitle, choiceAudio, choiceSubtitle),
             config.RemembersPrePlayChoices(client),
-            IsFreshPrePlayChoice(served, entry, autoplay, switching));
+            IsFreshPrePlayChoice(served, entry, autoplay, now, switching));
         var outcome = Decide(facts);
 
         if (config.DryRun)
@@ -438,14 +445,30 @@ public sealed class PlaybackInfoFilter : IAsyncActionFilter
             // A stream the request didn't name didn't change.
             previousAudio = askedAudio is null ? expectedAudio : repeat ? entry!.ExpectedAudio : served is not null ? servedAudio : choiceAudio;
             previousSubtitle = askedSubtitle is null ? expectedSubtitle : repeat ? entry!.ExpectedSubtitle : served is not null ? servedSubtitle : choiceSubtitle;
-            _logger.LogInformation(
-                "[Babelfin] PlaybackInfo for {Item} from {Client}: a manual choice ({Audio}/{Subtitle}, was {OldAudio}/{OldSubtitle}); trusted and remembered",
-                item.Name,
-                client,
-                expectedAudio,
-                expectedSubtitle,
-                previousAudio,
-                previousSubtitle);
+            if (repeat)
+            {
+                _logger.LogInformation(
+                    "[Babelfin] PlaybackInfo for {Item} from {Client}: a manual choice during play ({Audio}/{Subtitle}, was {OldAudio}/{OldSubtitle}); trusted, and remembered if it stays selected for {Seconds} s",
+                    item.Name,
+                    client,
+                    expectedAudio,
+                    expectedSubtitle,
+                    previousAudio,
+                    previousSubtitle,
+                    PlaybackMonitor.SettlePeriod.TotalSeconds);
+            }
+            else
+            {
+                _logger.LogInformation(
+                    "[Babelfin] PlaybackInfo for {Item} from {Client}: a manual choice ({Audio}/{Subtitle}, was {OldAudio}/{OldSubtitle}); trusted and remembered",
+                    item.Name,
+                    client,
+                    expectedAudio,
+                    expectedSubtitle,
+                    previousAudio,
+                    previousSubtitle);
+            }
+
             manualAudio = askedAudio.HasValue && expectedAudio.HasValue && expectedAudio != previousAudio;
             manualSubtitle = askedSubtitle.HasValue && expectedSubtitle.HasValue
                 && (!previousSubtitle.HasValue || Sub(expectedSubtitle) != Sub(previousSubtitle));
@@ -456,13 +479,15 @@ public sealed class PlaybackInfoFilter : IAsyncActionFilter
             AddTrustedEntry(user, item, client, askedAudio, askedSubtitle, choiceAudio, choiceSubtitle);
         }
 
-        var accepted = Register(session, deviceId, client, user, item, source, sessionSnapshot, pendingSnapshot, repeat, switching, outcome, trusted, manualAudio, manualSubtitle, expectedAudio, expectedSubtitle, choiceAudio, choiceSubtitle, observedAudio, observedSubtitle, now, order,
+        var accepted = Register(session, deviceId, client, user, item, source, sessionSnapshot, pendingSnapshot, repeat, switching, outcome, trusted, manualAudio, manualSubtitle, expectedAudio, expectedSubtitle, previousAudio, previousSubtitle, choiceAudio, choiceSubtitle, observedAudio, observedSubtitle, now, order,
             (audio, subtitle) =>
             {
                 if (outcome == PlaybackInfoOutcome.Replace)
                     Replace(args, dto, source, audio && subtitle && setSourceId ? mediaSourceId : null, !audioLeft && audio, !subtitleLeft && subtitle);
             });
-        if (outcome == PlaybackInfoOutcome.Manual && ((manualAudio && accepted.Audio) || (manualSubtitle && accepted.Subtitle)))
+
+        // A change during play is held on the play until it settles (Register); a pre-play choice is remembered now.
+        if (outcome == PlaybackInfoOutcome.Manual && !repeat && ((manualAudio && accepted.Audio) || (manualSubtitle && accepted.Subtitle)))
         {
             _recorder.Record(user, item, source,
                 manualAudio && accepted.Audio ? expectedAudio : previousAudio,
@@ -496,6 +521,8 @@ public sealed class PlaybackInfoFilter : IAsyncActionFilter
         bool manualSubtitle,
         int? expectedAudio,
         int? expectedSubtitle,
+        int? previousAudio,
+        int? previousSubtitle,
         int? choiceAudio,
         int? choiceSubtitle,
         int? observedAudio,
@@ -575,12 +602,15 @@ public sealed class PlaybackInfoFilter : IAsyncActionFilter
                 r.ManualChanged = true;
                 // Explicit PlaybackInfo picks and progress-report picks retire the same
                 // per-stream startup acknowledgement. Leave the other stream untouched.
+                // A change during play is held until it settles; a pre-play choice, remembered at once, replaces a held one.
                 if (manualAudio && acceptAudio)
                 {
                     r.ReportChoiceAudio = choiceAudio;
                     r.ManualAudioChanged = true;
                     r.ManualAudioRevision++;
                     r.ManualAudioOrder = order;
+                    if (repeat) r.HoldAudioChange(expectedAudio, previousAudio, now, order);
+                    else r.PendingAudio = null;
                 }
                 if (manualSubtitle && acceptSubtitle)
                 {
@@ -589,6 +619,8 @@ public sealed class PlaybackInfoFilter : IAsyncActionFilter
                     r.ManualSubtitleRevision++;
                     r.ManualSubtitleOrder = order;
                     r.LastSubtitleChangedAt = now;
+                    if (repeat) r.HoldSubtitleChange(expectedSubtitle, previousSubtitle, now, order);
+                    else r.PendingSubtitle = null;
                 }
                 if (repeat)
                 {
@@ -670,10 +702,15 @@ public sealed class PlaybackInfoFilter : IAsyncActionFilter
         => entry is not null && entry.Playing && entry.ItemId == itemId
             && ((mode == AppModeKind.ReplaceUnlessManual && entry.StartedAt.HasValue) || entry.LastProgressAt >= now - RepeatWindow);
 
-    /// <summary>Whether a served picker belongs to the new choice rather than the preceding autoplay transition.</summary>
-    public static bool IsFreshPrePlayChoice(DecisionRecord? served, PlayRecord? entry, bool autoplay, bool switching = false)
+    /// <summary>Whether a served picker belongs to the new choice rather than the preceding autoplay transition: during autoplay, the item was
+    /// served after the last stop and at least <see cref="PickerUseTime"/> before <paramref name="now"/>, by the latest or the previous serve.</summary>
+    public static bool IsFreshPrePlayChoice(DecisionRecord? served, PlayRecord? entry, bool autoplay, DateTime now, bool switching = false)
         // While another item still plays, its last stop belongs to an older transition. A response may just be a prefetch.
-        => served is not null && !switching && (!autoplay || (entry?.LastStoppedAt is { } lastStop && served.At > lastStop));
+        => served is not null && !switching && (!autoplay
+            || (entry?.LastStoppedAt is { } lastStop && (UsableAfter(served.At, lastStop, now) || UsableAfter(served.PreviousServedAt, lastStop, now))));
+
+    private static bool UsableAfter(DateTime? servedAt, DateTime lastStop, DateTime now)
+        => servedAt > lastStop && servedAt <= now - PickerUseTime;
 
     private AppModeKind AppModeFor(PluginConfiguration config, string? client)
     {

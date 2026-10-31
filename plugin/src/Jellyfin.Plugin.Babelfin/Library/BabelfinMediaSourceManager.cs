@@ -19,10 +19,28 @@ namespace Jellyfin.Plugin.Babelfin.Library;
 
 /// <summary>
 /// Wraps Jellyfin's <see cref="IMediaSourceManager"/>. Every member is forwarded unchanged; when media
-/// sources are fetched for a person, Babelfin's choice is written into each source's
-/// DefaultAudioStreamIndex / DefaultSubtitleStreamIndex afterwards. If anything goes wrong the source
-/// stays exactly as Jellyfin made it.
+/// sources are fetched for a person, Babelfin's choice is written into each source afterwards. If anything
+/// goes wrong the source stays exactly as Jellyfin made it.
 /// </summary>
+/// <remarks>
+/// What is written for each track Babelfin chooses (a track left to the video keeps everything Jellyfin set):
+/// <list type="bullet">
+/// <item>Audio: <see cref="MediaSourceInfo.DefaultAudioStreamIndex"/> is the chosen stream and
+/// <see cref="MediaSourceInfo.DefaultAudioIndexSource"/> is <see cref="AudioIndexSource.User"/>. For a PlaybackInfo request
+/// without an audio index, Jellyfin's StreamBuilder re-selects among all, default-flagged or same-language audio streams unless
+/// that flag marks the index as the person's choice; with it, StreamBuilder keeps the chosen stream and transcodes its audio
+/// when the device can't play the codec.</item>
+/// <item>Subtitles: <see cref="MediaSourceInfo.DefaultSubtitleStreamIndex"/> is the chosen stream, or -1 for off. For a request
+/// without a subtitle index, StreamBuilder uses that index unless more than one subtitle stream shares the highest
+/// <see cref="MediaStream.Score"/> (scored by Jellyfin from the person's Jellyfin subtitle settings); then it takes the first of
+/// them that an External subtitle profile of the device matches. So the chosen stream gets the highest score on its own (one
+/// above the highest subtitle score, or 1 when none is scored); with subtitles off and a shared highest score, the first of the
+/// tied streams gets one more point, which leaves -1 in charge. Other scores are untouched.</item>
+/// <item>A request that names an index is unaffected: StreamBuilder uses a requested index as it is, without reading the flag
+/// or the scores.</item>
+/// <item>On an error, both indices, the flag and every changed score go back to Jellyfin's values.</item>
+/// </list>
+/// </remarks>
 public sealed class BabelfinMediaSourceManager : IMediaSourceManager, IDisposable
 {
     private static readonly long ErrorLogInterval = TimeSpan.FromMinutes(1).Ticks;
@@ -188,6 +206,8 @@ public sealed class BabelfinMediaSourceManager : IMediaSourceManager, IDisposabl
 
         var jellyfinAudio = source.DefaultAudioStreamIndex;
         var jellyfinSubtitle = source.DefaultSubtitleStreamIndex;
+        var jellyfinAudioSource = source.DefaultAudioIndexSource;
+        List<(MediaStream Stream, int? Score)>? jellyfinScores = null;
         try
         {
             // Live TV, music and anything without an item are left alone.
@@ -221,11 +241,16 @@ public sealed class BabelfinMediaSourceManager : IMediaSourceManager, IDisposabl
             if (decision.AudioIndex.HasValue)
             {
                 source.DefaultAudioStreamIndex = decision.AudioIndex;
+
+                // Without a request index, Jellyfin's StreamBuilder re-selects among all, default-flagged or same-language
+                // audio streams unless the source marks the index as the person's choice.
+                source.DefaultAudioIndexSource = AudioIndexSource.User;
             }
 
             if (decision.SubtitleIndex.HasValue)
             {
                 source.DefaultSubtitleStreamIndex = decision.SubtitleIndex;
+                SettleSubtitleScores(source, decision.SubtitleIndex.Value, ref jellyfinScores);
             }
 
             _stats.Record(user.Id, item.Id, source.Id, new DecisionRecord(DateTime.UtcNow, jellyfinAudio, jellyfinSubtitle, decision, DecisionOutcome.Applied), source);
@@ -235,6 +260,8 @@ public sealed class BabelfinMediaSourceManager : IMediaSourceManager, IDisposabl
             // Leave the source exactly as Jellyfin made it.
             source.DefaultAudioStreamIndex = jellyfinAudio;
             source.DefaultSubtitleStreamIndex = jellyfinSubtitle;
+            source.DefaultAudioIndexSource = jellyfinAudioSource;
+            RestoreScores(jellyfinScores);
             if (item is not null)
             {
                 // This lookup passed through; PlaybackInfo must not act on an earlier successful decision.
@@ -248,6 +275,99 @@ public sealed class BabelfinMediaSourceManager : IMediaSourceManager, IDisposabl
             {
                 _logger.LogError(ex, "[Babelfin] Couldn't choose tracks for {Item}; Jellyfin's choice kept (further errors are logged at most once a minute)", item?.Name);
             }
+        }
+    }
+
+    /// <summary>
+    /// Adjusts subtitle scores so that StreamBuilder's default subtitle (used when a request carries no subtitle index) is
+    /// <paramref name="subtitleIndex"/>. StreamBuilder returns the source's DefaultSubtitleStreamIndex unless more than one
+    /// subtitle stream shares the highest Score; then it returns the first of those an External subtitle profile matches.
+    /// </summary>
+    /// <param name="source">The media source.</param>
+    /// <param name="subtitleIndex">Babelfin's subtitle index (-1 = off).</param>
+    /// <param name="changed">Receives each changed stream with its previous Score, before the change is made.</param>
+    internal static void SettleSubtitleScores(MediaSourceInfo source, int subtitleIndex, ref List<(MediaStream Stream, int? Score)>? changed)
+    {
+        var streams = source.MediaStreams;
+        if (streams is null)
+        {
+            return;
+        }
+
+        MediaStream? chosen = null;
+        MediaStream? firstTop = null;
+        int? top = null;
+        var topCount = 0;
+        foreach (var stream in streams)
+        {
+            if (stream is null || stream.Type != MediaStreamType.Subtitle)
+            {
+                continue;
+            }
+
+            if (subtitleIndex >= 0 && stream.Index == subtitleIndex)
+            {
+                chosen ??= stream;
+            }
+
+            if (stream.Score is not int score)
+            {
+                continue;
+            }
+
+            if (top is null || score > top.Value)
+            {
+                top = score;
+                topCount = 1;
+                firstTop = stream;
+            }
+            else if (score == top.Value)
+            {
+                topCount++;
+            }
+        }
+
+        if (top == int.MaxValue)
+        {
+            // No higher score exists; Jellyfin never scores this high.
+            return;
+        }
+
+        if (chosen is not null)
+        {
+            // The chosen stream carries the highest score on its own.
+            if (top.HasValue && chosen.Score == top && topCount == 1)
+            {
+                return;
+            }
+
+            SetScore(chosen, Math.Max(top ?? 0, 0) + 1, ref changed);
+        }
+        else if (topCount > 1 && firstTop is not null && top.HasValue)
+        {
+            // Off (or an index naming no subtitle stream): a unique highest score leaves DefaultSubtitleStreamIndex in charge.
+            SetScore(firstTop, top.Value + 1, ref changed);
+        }
+    }
+
+    private static void SetScore(MediaStream stream, int score, ref List<(MediaStream Stream, int? Score)>? changed)
+    {
+        (changed ??= new List<(MediaStream Stream, int? Score)>(1)).Add((stream, stream.Score));
+        stream.Score = score;
+    }
+
+    /// <summary>Puts back the scores <see cref="SettleSubtitleScores"/> changed, newest first.</summary>
+    /// <param name="changed">The changed streams with their previous scores, or null when none changed.</param>
+    internal static void RestoreScores(List<(MediaStream Stream, int? Score)>? changed)
+    {
+        if (changed is null)
+        {
+            return;
+        }
+
+        for (var i = changed.Count - 1; i >= 0; i--)
+        {
+            changed[i].Stream.Score = changed[i].Score;
         }
     }
 }

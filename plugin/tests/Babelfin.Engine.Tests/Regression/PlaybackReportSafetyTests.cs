@@ -271,28 +271,41 @@ public sealed class PlaybackReportSafetyTests
         Assert.False(user.RememberAudioSelections);
         Assert.False(user.RememberSubtitleSelections);
 
-        // Exercise the live endpoint, including its backup and per-person RestoreAsync path.
+        // Exercise the live endpoint, including its backup and per-person flag sync.
         var admin = ApiSafetyHost.Admin(store, flags, user);
         var resetResponse = await admin.ResetAll();
         var reset = Assert.IsType<ResetAllReport>(Assert.IsType<OkObjectResult>(resetResponse.Result).Value);
         Assert.Equal(1, reset.People);
         Assert.Empty(reset.FailedNames);
         Assert.True(File.Exists(Path.Combine(host.Folder, "babelfin", reset.BackupPath)));
+        Assert.True(store.TryGet(user.Id)!.HandleNextEpisode);
+        var kept = store.TryGet(user.Id)!.JellyfinChanges;
+        Assert.NotNull(kept);
+        Assert.Equal(audio, kept!.RememberAudioSelections);
+        Assert.Equal(subtitles, kept.RememberSubtitleSelections);
+        Assert.False(user.RememberAudioSelections);
+        Assert.False(user.RememberSubtitleSelections);
+
+        // A stale apply after reset keeps the record and the flags as they are without shutting down the service.
+        await flags.ApplyAsync(user, CancellationToken.None);
+        Assert.Equal(kept.ChangedAt, store.TryGet(user.Id)!.JellyfinChanges!.ChangedAt);
+        Assert.False(user.RememberAudioSelections);
+        Assert.False(user.RememberSubtitleSelections);
+
+        // A real settings edit turns handling off through SyncRememberFlagsAsync: the flags are restored and the record cleared.
+        var edited = store.TryGet(user.Id)!.Clone();
+        edited.HandleNextEpisode = false;
+        var saved = await admin.PutUserSettings(user.Id, edited);
+        Assert.IsType<OkObjectResult>(saved.Result);
         Assert.False(store.TryGet(user.Id)!.HandleNextEpisode);
         Assert.Null(store.TryGet(user.Id)!.JellyfinChanges);
         Assert.Equal(audio, user.RememberAudioSelections);
         Assert.Equal(subtitles, user.RememberSubtitleSelections);
 
-        // A stale apply after reset respects the stored Off preference without shutting down the service.
-        await flags.ApplyAsync(user, CancellationToken.None);
-        Assert.Null(store.TryGet(user.Id)!.JellyfinChanges);
-        Assert.Equal(audio, user.RememberAudioSelections);
-        Assert.Equal(subtitles, user.RememberSubtitleSelections);
-
-        // A real settings edit re-enables handling through SyncRememberFlagsAsync on this same instance.
-        var edited = store.TryGet(user.Id)!.Clone();
+        // Turning it on again on this same instance applies it afresh.
+        edited = store.TryGet(user.Id)!.Clone();
         edited.HandleNextEpisode = true;
-        var saved = await admin.PutUserSettings(user.Id, edited);
+        saved = await admin.PutUserSettings(user.Id, edited);
         Assert.IsType<OkObjectResult>(saved.Result);
         Assert.True(store.TryGet(user.Id)!.HandleNextEpisode);
         Assert.False(user.RememberAudioSelections);

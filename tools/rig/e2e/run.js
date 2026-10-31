@@ -29,6 +29,9 @@ const { Chrome, sleep } = require('./cdp');
 
 // ───────────────────────────── What the tests rely on ─────────────────────────────
 
+/** The person page's next-episode switch (i18n advanced.nextEpisode). */
+const NEXT_EPISODE_LABEL = 'Turn off Jellyfin\'s "based on previous item" track settings';
+
 const SPEC = {
     audioFor: (row) => 'Audio for ' + row,
     subtitlesFor: (row) => 'Subtitles for ' + row,
@@ -59,8 +62,7 @@ const SPEC = {
         Subtitles: ['When there are no full subtitles in your languages', 'Text or picture subtitles', /^Embedded or separate/, 'Always show subtitles',
             'Subtitles for the deaf and hard of hearing (SDH)', "When the audio's language is unknown"],
         Audio: ['Audio description tracks', 'Commentary tracks'],
-        // "Replace Jellyfin's remembered tracks" shows only while it is on (checked in 14 and 15).
-        'Track changes': ['Remember track changes for']
+        'Track changes': ['Remember track changes for', NEXT_EPISODE_LABEL]
     },
     personRemoved: ['Rules', 'Use my settings everywhere', 'Export settings', 'Import settings', 'Export, import and reset', 'If several tracks match',
         'How the original language is found', "Titles in a language I don't understand",
@@ -106,9 +108,10 @@ const SPEC = {
     resetDone: 'All settings were reset.',
     // Server versions and app defaults.
     pluginVersion: '0.19.0.0',
-    configVersion: 8,
-    personSchemaVersion: 3,
+    configVersion: 9,
+    personSchemaVersion: 4,
     desktop: 'Jellyfin Desktop',
+    android: 'Jellyfin for Android',
     desktopMode: 'ReplaceOnAutoplay',
     desktopLabel: "Use Babelfin's choice when playing the next episode"
 };
@@ -130,10 +133,10 @@ const PERSON_MENUS = [
     { field: 'Memory', label: 'Remember track changes for', group: 'Track changes', enumName: 'MemoryScope' }
 ];
 
-/** The person-level switch Restore defaults turns off. */
-const NEXT_EPISODE = { field: 'HandleNextEpisode', label: "Replace Jellyfin's remembered tracks", group: 'Track changes', bool: true, person: true };
+/** The person-level switch Restore defaults turns on. */
+const NEXT_EPISODE = { field: 'HandleNextEpisode', label: NEXT_EPISODE_LABEL, group: 'Track changes', bool: true, person: true };
 
-/** What the person page's Restore defaults clears: these Everyday fields, and HandleNextEpisode = false. */
+/** What the person page's Restore defaults clears: these Everyday fields, and HandleNextEpisode = true. */
 const PERSON_RESTORED = ['IfNothingMatches', 'Format', 'Embedded', 'Sdh', 'PrefersSdh', 'UnlabelledAudio', 'UnlabelledAudioLanguage', 'UsesAudioDescription',
     'AvoidCommentary', 'UnknownAudioCountsAsUnderstood', 'Memory'];
 
@@ -4724,7 +4727,7 @@ function personDefault(me, m) {
     const ad = me.AdvancedDefaults || {};
     const p = ad.Profile || {};
     if (m.person) {
-        return { value: ad[m.field] === undefined ? false : ad[m.field], from: ad[m.field] === undefined ? 'built-in false' : 'AdvancedDefaults.' + m.field };
+        return { value: ad[m.field] === undefined ? true : ad[m.field], from: ad[m.field] === undefined ? 'built-in true' : 'AdvancedDefaults.' + m.field };
     }
     if (p[m.field] !== undefined && p[m.field] !== null) {
         return { value: p[m.field], from: 'AdvancedDefaults.Profile.' + m.field };
@@ -4736,12 +4739,12 @@ function personDefault(me, m) {
     return m.field === 'Memory' ? { value: 'RestOfShow', from: 'the built-in RestOfShow (not in AdvancedDefaults)' } : { value: undefined, from: 'nothing in AdvancedDefaults' };
 }
 
-/** A document without any of the person-page Advanced fields Restore defaults clears (and HandleNextEpisode false). */
+/** A document without any of the person-page Advanced fields Restore defaults clears (and HandleNextEpisode true). */
 function withoutAdvanced(doc) {
     const d = clone(doc);
     d.Everyday = d.Everyday || {};
     PERSON_RESTORED.forEach((f) => { delete d.Everyday[f]; });
-    d.HandleNextEpisode = false;
+    d.HandleNextEpisode = true;
     return d;
 }
 
@@ -4972,7 +4975,7 @@ async function testPlainMenus(t) {
     await t.check(found.some((x) => x.c) && !offDefault.length, 'person page, nothing stored: every menu shows the value from AdvancedDefaults (' + found.filter((x) => x.c).map((x) => x.m.field + '=' + personDefault(me, x.m).value).join(', ') + ')'
         + (offDefault.length ? ' — ' + offDefault.join('; ') : ''), page);
     const sw = await page.evaluate(pgControl, null, wantOf(NEXT_EPISODE), null);
-    await t.check(!sw, 'person page: "' + NEXT_EPISODE.label + '" is not shown while it is off (' + (sw ? 'shown: ' + sw.kind + ' ' + sw.value : 'not shown') + ')', page);
+    await t.check(!!sw && sw.kind === 'checkbox' && sw.value === 'true', 'person page: "' + NEXT_EPISODE.label + '" is shown, on, with nothing stored (' + (sw ? sw.kind + ' ' + sw.value : 'not shown') + ')', page);
     const tcHelp = en['advanced.trackChanges.help'];
     const tcText = await page.evaluate(function () { return document.body.innerText; });
     await t.check(!!tcHelp && tcText.indexOf(tcHelp) >= 0, 'person page: Track changes says what a remembered change does ("' + String(tcHelp).slice(0, 60) + '…")', page);
@@ -5211,8 +5214,6 @@ async function testRestoreDefaults(t) {
     base.Everyday.Understood = ['en', 'ja'];
     base.Everyday.Reads = ['en', 'fr'];
     base.Enabled = true;
-    // "Replace Jellyfin's remembered tracks" shows only while it is on, so it is turned on here (as an older version would have).
-    base.HandleNextEpisode = true;
     await putMe(t, base, 'languages, table, nothing in Advanced, next-episode switch on');
     const ov = await t.api.put('/Babelfin/Me/Overrides/' + compactId(t.ids.movieId), { AudioChain: [{ Kind: 'Language', Language: 'de' }, { Kind: 'VideoDefault' }] }, { scope: 'Title' });
     if (ov.status !== 200) {
@@ -5250,14 +5251,15 @@ async function testRestoreDefaults(t) {
         await sleep(150);
     }
     const nextOn = !!ctl.HandleNextEpisode && ctl.HandleNextEpisode.value === 'true';
+    const nextOff = nextOn && await setSwitch(page, null, wantOf(NEXT_EPISODE), false);
     await sleep(t.settle);
     if ((await barOf(page, false)).visible) {
         await savePersonPage(t, page);
     }
     const before = (await getMe(t)).Settings;
     const notStored = set.filter((x) => !same((before.Everyday || {})[x.m.field], x.stored)).map((x) => x.m.field);
-    await t.check(set.length === PERSON_MENUS.length && !setProblems.length && !notStored.length && nextOn && before.HandleNextEpisode === true,
-        'person page: every Advanced menu set to another value through the page and saved, "' + NEXT_EPISODE.label + '" shown on (' + set.length + ' fields stored, HandleNextEpisode ' + before.HandleNextEpisode + ')'
+    await t.check(set.length === PERSON_MENUS.length && !setProblems.length && !notStored.length && nextOn && nextOff && before.HandleNextEpisode === false,
+        'person page: every Advanced menu set to another value through the page and saved, "' + NEXT_EPISODE.label + '" shown on and switched off (' + set.length + ' fields stored, HandleNextEpisode ' + before.HandleNextEpisode + ')'
         + (setProblems.length ? ' — ' + setProblems.join('; ') : '') + (notStored.length ? ' — not stored: ' + notStored.join(', ') : ''), page);
 
     // 15b. The button: at the end of Advanced, outside the groups.
@@ -5304,8 +5306,8 @@ async function testRestoreDefaults(t) {
         const after = (await getMe(t)).Settings;
         const left = PERSON_RESTORED.filter((f) => (after.Everyday || {})[f] !== null && (after.Everyday || {})[f] !== undefined).map((f) => f + '=' + JSON.stringify(after.Everyday[f]));
         const stray = strayPaths(before, after, PERSON_RESTORED.map((f) => 'Everyday.' + f).concat(['HandleNextEpisode', 'JellyfinChanges']));
-        await t.check(!left.length && after.HandleNextEpisode === false && !stray.length, 'person page: after Save the API shows exactly ' + PERSON_RESTORED.join(', ') + ' cleared and HandleNextEpisode false'
-            + (left.length ? ' — still set: ' + left.join(', ') : '') + (after.HandleNextEpisode === false ? '' : ' — HandleNextEpisode ' + after.HandleNextEpisode) + (stray.length ? ' — also changed: ' + stray.join(', ') : ''), page);
+        await t.check(!left.length && after.HandleNextEpisode === true && !stray.length, 'person page: after Save the API shows exactly ' + PERSON_RESTORED.join(', ') + ' cleared and HandleNextEpisode true'
+            + (left.length ? ' — still set: ' + left.join(', ') : '') + (after.HandleNextEpisode === true ? '' : ' — HandleNextEpisode ' + after.HandleNextEpisode) + (stray.length ? ' — also changed: ' + stray.join(', ') : ''), page);
         const keptOk = same(after.Everyday.Understood, before.Everyday.Understood) && same(after.Everyday.Reads, before.Everyday.Reads) && after.Enabled === before.Enabled
             && after.PerLibrary === before.PerLibrary && same(tableOf(after.Everyday), tableOf(before.Everyday)) && same(libraryTables(after), libraryTables(before)) && same(after.Overrides, before.Overrides);
         await t.check(keptOk, 'person page: My languages, Languages for subtitles, the on/off switch, the table (both modes) and the show and movie overrides are untouched (' + (after.Overrides || []).length + ' overrides; the page saves with keepOverrides)', page);
@@ -5313,10 +5315,10 @@ async function testRestoreDefaults(t) {
         await openEverything(page, false);
         const reloaded = await personAdvanced(page);
         const off = PERSON_MENUS.filter((m) => !showsValue(reloaded[m.field], en, m, personDefault(me, m).value)).map((m) => m.field);
-        if (reloaded.HandleNextEpisode) {
-            off.push('"' + NEXT_EPISODE.label + '" still shown');
+        if (!showsValue(reloaded.HandleNextEpisode, en, NEXT_EPISODE, personDefault(me, NEXT_EPISODE).value)) {
+            off.push('"' + NEXT_EPISODE.label + '" not shown on');
         }
-        await t.check(!off.length && !(await barOf(page, false)).visible, 'person page: after a reload every Advanced menu shows its default, "' + NEXT_EPISODE.label + '" is gone and there is no save bar' + (off.length ? ' — not: ' + off.join(', ') : ''), page);
+        await t.check(!off.length && !(await barOf(page, false)).visible, 'person page: after a reload every Advanced menu shows its default, "' + NEXT_EPISODE.label + '" is still shown, on, and there is no save bar' + (off.length ? ' — not: ' + off.join(', ') : ''), page);
     }
 
     // 15c. The admin page: Apps and Track recognition changed through the page and saved.
@@ -5816,7 +5818,7 @@ async function overrideWording(t, page) {
     }
 }
 
-// ───────────────────────────── 19. Settings version 8 and the Jellyfin Desktop row ─────────────────────────────
+// ───────────────────────────── 19. Settings version 9 and the Jellyfin Desktop and Jellyfin for Android rows ─────────────────────────────
 
 async function testServerV8(t) {
 
@@ -5830,6 +5832,8 @@ async function testServerV8(t) {
     await t.check(admin.ConfigVersion === SPEC.configVersion, 'GET Admin/Settings: settings version ' + SPEC.configVersion + ' (ConfigVersion ' + admin.ConfigVersion + ')');
     const desk = (admin.AppModes || []).find((a) => a.Client === SPEC.desktop);
     await t.check(!!desk && String(desk.Mode) === SPEC.desktopMode, 'GET Admin/Settings: the app list has "' + SPEC.desktop + '" on ' + SPEC.desktopMode + ' (' + (desk ? canon(desk) : 'no row; clients: ' + (admin.AppModes || []).map((a) => a.Client).join(', ')) + ')');
+    const droid = (admin.AppModes || []).find((a) => a.Client === SPEC.android);
+    await t.check(!!droid && String(droid.Mode) === SPEC.desktopMode, 'GET Admin/Settings: the app list has "' + SPEC.android + '" on ' + SPEC.desktopMode + ' (' + (droid ? canon(droid) : 'no row; clients: ' + (admin.AppModes || []).map((a) => a.Client).join(', ')) + ')');
     const shipped = await t.api.get('/Babelfin/Admin/Defaults');
     const sdesk = shipped.status === 200 ? ((shipped.body.AppModes || []).find((a) => a.Client === SPEC.desktop)) : null;
     await t.check(!!sdesk && String(sdesk.Mode) === SPEC.desktopMode && shipped.body.ConfigVersion === SPEC.configVersion,
@@ -5849,6 +5853,8 @@ async function testServerV8(t) {
         c = null;
     }
     await t.check(!!c && c.text === SPEC.desktopLabel, 'admin page, Apps: the "' + SPEC.desktop + '" row reads "' + SPEC.desktopLabel + '" (' + (c ? '"' + c.text + '"' : 'no row') + ')', page);
+    const android = await page.evaluate(pgControl, ADMIN, { label: ADMIN_MENUS.appPrefix + ' · ' + SPEC.android }, null);
+    await t.check(!!android && android.text === SPEC.desktopLabel, 'admin page, Apps: the "' + SPEC.android + '" row reads "' + SPEC.desktopLabel + '" (' + (android ? '"' + android.text + '"' : 'no row') + ')', page);
     await page.evaluate(pgClearBabelfinStorage);
 }
 
@@ -6545,8 +6551,8 @@ async function testResetAll(t) {
     const me = (await getMe(t)).Settings;
     const adminAfter = await getAdmin(t);
     const shipped = await t.api.get('/Babelfin/Admin/Defaults');
-    await t.check((me.Overrides || []).length === 0 && (me.Libraries || []).length === 0 && (me.PerLibrary === null || me.PerLibrary === undefined) && !me.HandleNextEpisode,
-        'after the reset the person starts again: no per-title or library choices, no mode (' + (me.Overrides || []).length + ', ' + (me.Libraries || []).length + ', ' + me.PerLibrary + ')', null);
+    await t.check((me.Overrides || []).length === 0 && (me.Libraries || []).length === 0 && (me.PerLibrary === null || me.PerLibrary === undefined) && me.HandleNextEpisode === true,
+        'after the reset the person starts again: no per-title or library choices, no mode, the next-episode switch on (' + (me.Overrides || []).length + ', ' + (me.Libraries || []).length + ', ' + me.PerLibrary + ', ' + me.HandleNextEpisode + ')', null);
     await t.check(shipped.status === 200 && same(adminCore(adminAfter), adminCore(shipped.body)), 'after the reset Admin/Settings equals Admin/Defaults'
         + (same(adminCore(adminAfter), adminCore(shipped.body)) ? '' : ' (differs: ' + changedPaths(JSON.parse(adminCore(shipped.body)), JSON.parse(adminCore(adminAfter))).join(', ') + ')'), null);
     const peopleRow = await page.evaluate(function (scope, id) {
@@ -6758,11 +6764,16 @@ async function rememberTrackChange(t, api, episodeId) {
             AudioStreamIndex: other.Index, EventName: 'TimeUpdate', PositionTicks: 2000000
         }));
         // Off in the same packet as an audio switch can be the player's reset.
-        // A separate, later report represents the deliberate subtitle-off fixture.
+        // A separate, later report represents the deliberate subtitle-off fixture; it also confirms the audio change,
+        // which has stayed selected for Babelfin's 10-second settle period by then.
         await sleep(10500);
-        await post('/Sessions/Playing/Progress', Object.assign({}, play, {
+        const off = Object.assign({}, play, {
             AudioStreamIndex: other.Index, SubtitleStreamIndex: -1, EventName: 'TimeUpdate', PositionTicks: 120000000
-        }));
+        });
+        await post('/Sessions/Playing/Progress', off);
+        // A report after the settle period confirms the subtitle change.
+        await sleep(10500);
+        await post('/Sessions/Playing/Progress', Object.assign({}, off, { PositionTicks: 230000000 }));
         const stored = await waitStored(t, '/Babelfin/Admin/Users/' + compactId(uid) + '/Settings', body => {
             const doc = body.Settings || body;
             return (doc.Overrides || []).some(o => compactId(o.ItemId) === target && o.Manual && o.Manual.Audio && o.Manual.SubtitlesOff);
@@ -7907,7 +7918,7 @@ async function testPrePlayChoices(t) {
     seed.AppModes.push({ Client: discovered, Mode: 'Trust', SeenOnly: true, Seen: true, LastSeen: '2026-01-01T00:00:00Z', RememberPrePlayChoices: false });
     await putAdmin(t, seed, 'shipped app flags and a discovered row');
     const apps = await t.api.get('/Babelfin/Admin/Apps');
-    const webFamily = ['Jellyfin Web', 'Jellyfin Media Player', 'Jellyfin Desktop', 'Jellyfin Android'];
+    const webFamily = ['Jellyfin Web', 'Jellyfin Media Player', 'Jellyfin Desktop', 'Jellyfin Android', 'Jellyfin for Android'];
     const rows = apps.status === 200 && Array.isArray(apps.body) ? apps.body : [];
     await t.check(webFamily.every(name => rows.some(r => r.Client === name)) && rows.length > webFamily.length
         && rows.every(r => typeof r.RememberPrePlayChoices === 'boolean' && r.RememberPrePlayChoices === webFamily.includes(r.Client)),
@@ -8257,7 +8268,7 @@ async function testAudioChoices(t) {
     const vr = await t.api.put('/Babelfin/Admin/Users/' + t.ids.viewerId + '/Settings', person);
     if (vr.status !== 200) throw new Error('Cannot prepare People editor: ' + vr.status);
     await t.check((await getMe(t)).Settings.SchemaVersion === SPEC.personSchemaVersion && (await getAdmin(t)).ConfigVersion === SPEC.configVersion,
-        'person schema 3 and config 8 are current');
+        'person schema ' + SPEC.personSchemaVersion + ' and config ' + SPEC.configVersion + ' are current');
     const en = (await strings(t)).person;
     for (const context of editorContexts(t, page)) {
         await context.load();
@@ -8641,7 +8652,7 @@ async function testGenreMigration(t) {
     empty.MigrationNotes = [];
     await importPerson(empty);
     let loaded = await readPerson(t, uid);
-    await t.check(loaded.SchemaVersion === 3 && (loaded.MigrationNotes || []).length === 0,
+    await t.check(loaded.SchemaVersion === SPEC.personSchemaVersion && (loaded.MigrationNotes || []).length === 0,
         'an empty schema-2 person upgrades without a migration note');
     const legacy = neutralPerson(original), rule = genreRule(FIXTURE_GENRES[0], 'lang:ja', 'smart');
     rule.Id = 'b6b60000000040008000000000000001';
@@ -8654,7 +8665,7 @@ async function testGenreMigration(t) {
     await importPerson(legacy);
     loaded = await readPerson(t, uid);
     const active = genreRules(loaded);
-    await t.check(loaded.SchemaVersion === 3 && active.length === 2 && active.map(r => r.Conditions[0].Values[0]).join('|') === FIXTURE_GENRES.join('|')
+    await t.check(loaded.SchemaVersion === SPEC.personSchemaVersion && active.length === 2 && active.map(r => r.Conditions[0].Values[0]).join('|') === FIXTURE_GENRES.join('|')
         && active.every(r => same(tableOf(r.Settings), storedFor('lang:ja', 'smart')) && r.Settings.AvoidCommentary == null)
         && loaded.Retired.GenreRules.some(r => r.Settings.AvoidCommentary === true),
         'legacy OR-list genres become two visible rows; audio/subtitle choices survive and the complete original stays archived');
@@ -9192,7 +9203,7 @@ const TESTS = [
     { n: 16, id: 'people', title: 'People table: Name, Audio, Subtitles, Edit from GET Admin/Users', run: testPeopleTable },
     { n: 17, id: 'newusers', title: 'New users: only My languages, no template table fields', run: testNewUsers },
     { n: 18, id: 'wording', title: 'Wording: "My languages"', run: testWording },
-    { n: 19, id: 'v8', aliases: ['v7', 'v6'], title: 'Settings version 8 and the Jellyfin Desktop row', run: testServerV8 },
+    { n: 19, id: 'v8', aliases: ['v7', 'v6'], title: 'Settings version 9 and the Jellyfin Desktop and Jellyfin for Android rows', run: testServerV8 },
     { n: 20, id: 'alignment', title: 'Alignment: the text of every button centred, desktop and phone width', run: testAlignment },
     { n: 21, id: 'route', title: 'Babelfin Settings at #/babelfin under Jellyfin\'s header, every layout; unsaved changes asked about', run: testSettingsRoute },
     { n: 22, id: 'info', title: 'An explanation ("i") for every option on both pages: text, wiring, hover, click, Escape', run: testInfoTips },

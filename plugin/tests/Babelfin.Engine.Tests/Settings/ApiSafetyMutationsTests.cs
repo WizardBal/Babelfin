@@ -94,8 +94,26 @@ public class ApiSafetyMutationsTests
         var saved = store.TryGet(Ids.Person)!;
         Assert.False(saved.Locks.AvoidCommentary);
         Assert.Equal(Json(changes), Json(saved.JellyfinChanges));
-        Assert.Equal(new[] { Ids.Person }, flags.Restored);
+        // The fresh document keeps the next-episode switch at its default, on: the flags stay off and the record stays.
+        Assert.True(saved.HandleNextEpisode);
+        Assert.Empty(flags.Restored);
+        Assert.Empty(flags.Applied);
         Assert.Empty(saved.Overrides);
+    }
+
+    [Fact]
+    public async Task MeResetTurnsTheNextEpisodeSwitchBackOnAndAppliesIt()
+    {
+        var store = new ApiSafetyStore();
+        var document = Document();
+        document.HandleNextEpisode = false;
+        store.Inner.Save(document);
+        var flags = new ApiSafetyFlags();
+        var response = await ApiSafetyHost.Me(store, ApiSafetyHost.Person(), flags).Reset();
+        Assert.IsType<OkObjectResult>(response.Result);
+        Assert.True(store.TryGet(Ids.Person)!.HandleNextEpisode);
+        Assert.Equal(new[] { Ids.Person }, flags.Applied);
+        Assert.Empty(flags.Restored);
     }
 
     [Fact]
@@ -195,38 +213,43 @@ public class ApiSafetyMutationsTests
     }
 
     [Fact]
-    public async Task ResetAllPreservesLatestUndoRecordAndReportsFlagRestorationFailure()
+    public async Task ResetAllPreservesLatestUndoRecordAndKeepsTheNextEpisodeSwitchOn()
     {
         var store = new ApiSafetyStore();
         store.Inner.Save(new PersonSettings { UserId = Ids.Person, HandleNextEpisode = true });
         var latest = new JellyfinChanges { RememberAudioSelections = true, RememberSubtitleSelections = true };
         store.BeforeUpdate = () => store.Inner.Update(Ids.Person, current => { var copy = current!.Clone(); copy.JellyfinChanges = latest; return copy; });
-        var admin = ApiSafetyHost.Admin(store, new ApiSafetyFlags { FailRestore = true }, ApiSafetyHost.Person());
+        var flags = new ApiSafetyFlags { FailRestore = true };
+        var admin = ApiSafetyHost.Admin(store, flags, ApiSafetyHost.Person());
         var report = await admin.ResetPeopleAsync("backup.json");
-        Assert.Equal(new[] { "Alice" }, report.FailedNames);
-        Assert.Equal(500, admin.ResetResult(report).StatusCode);
+        Assert.Empty(report.FailedNames);
+        Assert.Equal(200, admin.ResetResult(report).StatusCode);
         Assert.Equal(Json(latest), Json(store.TryGet(Ids.Person)!.JellyfinChanges));
+        Assert.True(store.TryGet(Ids.Person)!.HandleNextEpisode);
+        Assert.Empty(flags.Applied);
+        Assert.Empty(flags.Restored);
     }
 
     [Theory]
     [InlineData(false)]
     [InlineData(true)]
-    public async Task ResetReportsRememberFlagFailuresThatTheProductionServiceLogsWithoutThrowing(bool fail)
+    public async Task ResetTurnsTheNextEpisodeSwitchOnAndKeepsJellyfinFlagsOff(bool recorded)
     {
         var store = new ApiSafetyStore();
         var user = ApiSafetyHost.Person();
-        user.RememberAudioSelections = false;
-        user.RememberSubtitleSelections = false;
+        user.RememberAudioSelections = !recorded;
+        user.RememberSubtitleSelections = !recorded;
         store.Inner.Save(new PersonSettings
         {
-            UserId = user.Id, HandleNextEpisode = true,
-            JellyfinChanges = new JellyfinChanges { RememberAudioSelections = true, RememberSubtitleSelections = true },
+            UserId = user.Id, HandleNextEpisode = recorded,
+            JellyfinChanges = recorded ? new JellyfinChanges { RememberAudioSelections = true, RememberSubtitleSelections = true } : null,
         });
+        var updates = 0;
         var manager = CallProxy.Create<IUserManager>((method, args) =>
         {
             if (method.Name == nameof(IUserManager.UpdateConfigurationAsync))
             {
-                if (fail) { throw new System.IO.IOException("Jellyfin update failed"); }
+                updates++;
                 var config = (UserConfiguration)args[1]!;
                 user.RememberAudioSelections = config.RememberAudioSelections;
                 user.RememberSubtitleSelections = config.RememberSubtitleSelections;
@@ -237,13 +260,15 @@ public class ApiSafetyMutationsTests
         var flags = new RememberFlags(manager, store, new ListActivityLog(), NullLogger<RememberFlags>.Instance);
         var admin = ApiSafetyHost.Admin(store, flags, user);
         var report = await admin.ResetPeopleAsync("backup.json");
-        Assert.Equal(fail ? 0 : 1, report.People);
-        Assert.Equal(fail ? new[] { "Alice" } : Array.Empty<string>(), report.FailedNames);
-        Assert.Equal(fail ? 500 : 200, admin.ResetResult(report).StatusCode);
-        Assert.Equal(fail, store.TryGet(user.Id)!.JellyfinChanges is not null);
-        Assert.False(store.TryGet(user.Id)!.HandleNextEpisode);
-        Assert.Equal(!fail, user.RememberAudioSelections);
-        Assert.Equal(!fail, user.RememberSubtitleSelections);
+        Assert.Equal(1, report.People);
+        Assert.Empty(report.FailedNames);
+        Assert.Equal(200, admin.ResetResult(report).StatusCode);
+        var saved = store.TryGet(user.Id)!;
+        Assert.True(saved.HandleNextEpisode);
+        Assert.True(saved.JellyfinChanges is { RememberAudioSelections: true, RememberSubtitleSelections: true });
+        Assert.False(user.RememberAudioSelections);
+        Assert.False(user.RememberSubtitleSelections);
+        Assert.Equal(recorded ? 0 : 1, updates);
     }
 
     [Theory]

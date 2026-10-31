@@ -21,9 +21,12 @@ public sealed partial class PlaybackBoundaryAdversarialTests
         Assert.Single(h.Commands);
         h.Now = start.AddSeconds(8);
         h.Report(h.First, audio ? 5 : 2, audio ? 4 : 3);
-        h.Now = start.AddSeconds(12);
+        h.Settle(h.First, audio ? 5 : 2, audio ? 4 : 3);
+        // The start's correction command reaches the app late, still within its lifetime.
+        h.Now = start.AddSeconds(22);
         await h.Request(h.First, 2, 4);
         h.Report(h.First, 2, 4);
+        h.Settle(h.First, 2, 4);
         var memory = Assert.Single(h.Store.TryGet(h.User.Id)!.Overrides).Manual!;
         if (audio) Assert.Equal("fr", memory.Audio!.Language);
         else Assert.Equal("partial", memory.Subtitle!.Kind);
@@ -41,6 +44,7 @@ public sealed partial class PlaybackBoundaryAdversarialTests
         h.Report(h.First, leaveAudio ? 1 : 2, 4);
         h.Now = start.AddSeconds(60);
         h.Report(h.First, 5, -1);
+        h.Settle(h.First, 5, -1);
         Assert.DoesNotContain(h.Store.TryGet(h.User.Id)!.Overrides, o => o.Manual?.SubtitlesOff == true);
     }
 
@@ -56,6 +60,7 @@ public sealed partial class PlaybackBoundaryAdversarialTests
         h.Report(h.First, 5, 4);
         h.Now = start.AddSeconds(66);
         h.Report(h.First, 5, -1);
+        h.Settle(h.First, 5, -1);
         Assert.DoesNotContain(h.Store.TryGet(h.User.Id)!.Overrides, o => o.Manual?.SubtitlesOff == true);
     }
 
@@ -74,6 +79,7 @@ public sealed partial class PlaybackBoundaryAdversarialTests
         h.Now = start.AddSeconds(66);
         await h.Request(h.First, subtitle: -1);
         h.Report(h.First, 5, -1);
+        h.Settle(h.First, 5, -1);
         Assert.False(Assert.Single(h.Store.TryGet(h.User.Id)!.Overrides).Manual!.SubtitlesOff);
     }
 
@@ -95,6 +101,7 @@ public sealed partial class PlaybackBoundaryAdversarialTests
         h.Report(h.First, audio ? 5 : 1, audio ? -1 : 3);
         h.Now = start.AddSeconds(35);
         h.Report(h.First, audio ? 2 : 1, audio ? -1 : 4);
+        h.Settle(h.First, audio ? 2 : 1, audio ? -1 : 4);
         var memory = Assert.Single(h.Store.TryGet(h.User.Id)!.Overrides).Manual!;
         if (audio) Assert.Equal("ja", memory.Audio!.Language);
         else Assert.Equal("full", memory.Subtitle!.Kind);
@@ -118,6 +125,7 @@ public sealed partial class PlaybackBoundaryAdversarialTests
         Assert.Equal(audio ? T0 : null, play.SubtitleCommandSentAt);
         Assert.Equal(T0, play.CorrectionSentAt);
         h.Report(h.First, audio ? 2 : 1, audio ? -1 : 4);
+        h.Settle(h.First, audio ? 2 : 1, audio ? -1 : 4);
         Assert.Empty(h.Store.TryGet(h.User.Id)!.Overrides);
     }
 
@@ -135,9 +143,11 @@ public sealed partial class PlaybackBoundaryAdversarialTests
         h.Report(h.First, 2, 4);
         h.Now = T0.AddSeconds(8);
         h.Report(h.First, audio ? 5 : 2, audio ? 4 : 3);
-        h.Now = T0.AddSeconds(12);
+        h.Settle(h.First, audio ? 5 : 2, audio ? 4 : 3);
+        h.Now = T0.AddSeconds(22);
         await h.Request(h.First, 2, 4);
         h.Report(h.First, 2, 4);
+        h.Settle(h.First, 2, 4);
         var memory = Assert.Single(h.Store.TryGet(h.User.Id)!.Overrides).Manual!;
         if (audio) Assert.Equal("ja", memory.Audio!.Language);
         else Assert.Equal("full", memory.Subtitle!.Kind);
@@ -154,9 +164,11 @@ public sealed partial class PlaybackBoundaryAdversarialTests
         h.Report(h.First, audio ? 1 : 2, audio ? 4 : -1);
         h.Now = T0.AddSeconds(8);
         h.Report(h.First, audio ? 5 : 2, audio ? 4 : 3);
-        h.Now = T0.AddSeconds(12);
+        h.Settle(h.First, audio ? 5 : 2, audio ? 4 : 3);
+        h.Now = T0.AddSeconds(22);
         await h.Request(h.First, audio ? 2 : 5, audio ? 3 : 4);
         h.Report(h.First, audio ? 2 : 5, audio ? 3 : 4);
+        h.Settle(h.First, audio ? 2 : 5, audio ? 3 : 4);
         var memory = Assert.Single(h.Store.TryGet(h.User.Id)!.Overrides).Manual!;
         Assert.Equal("fr", memory.Audio!.Language);
         Assert.Equal("partial", memory.Subtitle!.Kind);
@@ -175,9 +187,11 @@ public sealed partial class PlaybackBoundaryAdversarialTests
         h.Report(h.First, audio ? 1 : 2, audio ? 4 : -1);
         h.Now = T0.AddSeconds(8);
         h.Report(h.First, audio ? 5 : 2, audio ? 4 : 3);
+        h.Settle(h.First, audio ? 5 : 2, audio ? 4 : 3);
         h.Now = T0.AddSeconds(30).AddTicks(extraTicks);
         await h.Request(h.First, 2, 4);
         h.Report(h.First, 2, 4);
+        h.Settle(h.First, 2, 4);
         var memory = Assert.Single(h.Store.TryGet(h.User.Id)!.Overrides).Manual!;
         if (audio) Assert.Equal(extraTicks == 0 ? "fr" : "ja", memory.Audio!.Language);
         else Assert.Equal(extraTicks == 0 ? "partial" : "full", memory.Subtitle!.Kind);

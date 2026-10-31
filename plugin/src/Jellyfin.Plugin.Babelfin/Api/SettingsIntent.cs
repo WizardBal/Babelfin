@@ -235,8 +235,7 @@ internal sealed class SettingsIntent
                 if (current["everyday"] is not JsonObject everyday) current["everyday"] = everyday = new JsonObject();
                 everyday["understood"] = value?.DeepClone();
                 // Re-serialize to recompute read-only fields such as IsEmpty before deciding whether every field is truly default.
-                var normalized = JsonSerializer.SerializeToNode(current.Deserialize<PersonSettings>(CompleteJson), CompleteJson);
-                if (JsonNode.DeepEquals(normalized, JsonSerializer.SerializeToNode(new PersonSettings(), CompleteJson))) result["newUserTemplate"] = null;
+                if (JsonNode.DeepEquals(TemplateChoices(current.Deserialize<PersonSettings>(CompleteJson)), TemplateChoices(new PersonSettings()))) result["newUserTemplate"] = null;
                 continue;
             }
             if (path[0] == "libraries" && path.Length > 1)
@@ -254,6 +253,16 @@ internal sealed class SettingsIntent
             to[path[^1]] = path[0] == "seed" && from is null ? JsonValue.Create(false) : from?[path[^1]]?.DeepClone();
         }
         return result.Deserialize<T>(CompleteJson)!;
+    }
+
+    // The template never copies HandleNextEpisode and keeps the schema version it was stored at: neither is a choice, so a template
+    // stored before schema 4 (when the switch defaulted to off) is as empty as a fresh one.
+    private static JsonNode? TemplateChoices(PersonSettings? template)
+    {
+        var node = JsonSerializer.SerializeToNode(template, CompleteJson) as JsonObject;
+        node?.Remove("schemaVersion");
+        node?.Remove("handleNextEpisode");
+        return node;
     }
 
     private static void ApplyLibraryLeaf(JsonObject result, JsonObject source, string[] path)

@@ -74,7 +74,7 @@ public sealed class PluginDisableCleanup : IHostedService
         }
 
         if (remember is not null)
-            await Restore("remember flags", ct => remember.RestoreAllAsync(ct, turnSwitchOff: false), cancellationToken).ConfigureAwait(false);
+            await Restore("remember flags", ct => remember.RestoreAllAsync(ct), cancellationToken).ConfigureAwait(false);
         if (compatibility is not null)
             await Restore("compatibility selections", ct => compatibility.UndoAllAsync(ct), cancellationToken).ConfigureAwait(false);
     }

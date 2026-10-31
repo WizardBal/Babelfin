@@ -22,11 +22,14 @@ namespace Jellyfin.Plugin.Babelfin.Playback;
 /// <summary>What one start or progress report calls for, decided under the registry's lock and carried out after it.</summary>
 /// <param name="SendAudio">The audio index to command, or null.</param>
 /// <param name="SendSubtitle">The subtitle index to command (-1 = off), or null.</param>
-/// <param name="Manual">Whether the report is a manual change to remember.</param>
-/// <param name="ManualAudio">The audio index now playing (for the recorder).</param>
-/// <param name="ManualSubtitle">The subtitle index now playing (for the recorder).</param>
+/// <param name="Manual">Whether the report shows a manual change (remembered once it has settled).</param>
+/// <param name="ManualAudio">The audio index now playing.</param>
+/// <param name="ManualSubtitle">The subtitle index now playing.</param>
 /// <param name="PreviousAudio">The audio index before the change.</param>
 /// <param name="PreviousSubtitle">The subtitle index before the change.</param>
+/// <param name="Settled">The play's changes that stayed selected for <see cref="PlaybackMonitor.SettlePeriod"/>: what to remember now.</param>
+/// <param name="Held">Whether the report's change is held until it settles.</param>
+/// <param name="Dropped">Whether a held change was dropped: its stream returned to the track before it, or shows another track.</param>
 public readonly record struct ReportPlan(
     int? SendAudio,
     int? SendSubtitle,
@@ -34,7 +37,10 @@ public readonly record struct ReportPlan(
     int? ManualAudio,
     int? ManualSubtitle,
     int? PreviousAudio,
-    int? PreviousSubtitle)
+    int? PreviousSubtitle,
+    SettledChange? Settled = null,
+    bool Held = false,
+    bool Dropped = false)
 {
     /// <summary>Gets a value indicating whether a track-switch command is to be sent.</summary>
     public bool HasCommands => SendAudio.HasValue || SendSubtitle.HasValue;
@@ -43,7 +49,8 @@ public readonly record struct ReportPlan(
 /// <summary>
 /// Watches Jellyfin's playback events: keeps each session's play in the <see cref="PlayRegistry"/>,
 /// corrects each stream whose first reported index differs from the expected track (once, when the app accepts the commands), and turns a
-/// track change made more than <see cref="PluginConfiguration.ManualChangeAfterSeconds"/> after start into a remembered override.
+/// track change made more than <see cref="PluginConfiguration.ManualChangeAfterSeconds"/> after start into a remembered override once it
+/// has stayed selected for <see cref="SettlePeriod"/>.
 /// Cheap to construct (events are subscribed in <see cref="StartAsync"/>); every handler catches and logs; nothing here ever
 /// stops or delays playback.
 /// </summary>
@@ -52,6 +59,11 @@ public readonly record struct ReportPlan(
 /// <list type="bullet">
 /// <item>The start report counts as the play's first report: correction is considered once for each stream, when its first index arrives,
 /// and that index becomes its baseline for manual-change detection.</item>
+/// <item>A change during play (from a report, or from a repeat PlaybackInfo request) updates the play's expected tracks at once but is
+/// held: it is remembered when a report at least <see cref="SettlePeriod"/> after it still names that track, or when the play stops or
+/// is replaced by another item with that track still selected for at least that long. A newer change of the same stream replaces it and
+/// keeps the track it started from; a return to that track, or a report naming another track, drops it. Each stream is held on its own
+/// and remembered with the order in which its change was observed, so a newer remembered change is never overwritten.</item>
 /// <item>A null index in a report means "not reported" (some apps never send one) and is never read as a change or as "off";
 /// a negative subtitle index is "off".</item>
 /// <item>A report that shows a commanded index clears the command, so a later change back to it by hand is manual.</item>
@@ -65,6 +77,11 @@ public readonly record struct ReportPlan(
 /// </remarks>
 public sealed class PlaybackMonitor : IHostedService
 {
+    /// <summary>A track change during play is remembered only once it has stayed selected this long: a player restarting its stream
+    /// can report a passing index (jellyfin-web asks for subtitles off while it switches away from burned-in subtitles), and a change
+    /// reverted within this time is not a preference.</summary>
+    public static readonly TimeSpan SettlePeriod = TimeSpan.FromSeconds(10);
+
     private static readonly PluginConfiguration DefaultConfiguration = new();
 
     private readonly ISessionManager _sessionManager;
@@ -111,8 +128,9 @@ public sealed class PlaybackMonitor : IHostedService
     }
 
     /// <summary>
-    /// Decides what a start or progress report calls for and updates the entry (pure apart from the entry; runs under the
-    /// registry's lock): correction for each first reported stream index, plus manual-change detection after the window.
+    /// Decides what a start or progress report calls for and updates the entry (pure apart from the entry and the process's
+    /// <see cref="ManualChangeOrder"/>; runs under the registry's lock): correction for each first reported stream index,
+    /// manual-change detection after the window, and the held changes that settle or drop with this report.
     /// </summary>
     /// <param name="r">The play's entry (changed in place).</param>
     /// <param name="audio">The reported audio index (null = not reported).</param>
@@ -186,6 +204,8 @@ public sealed class PlaybackMonitor : IHostedService
         }
 
         var manual = false;
+        var held = false;
+        var dropped = false;
         int? previousAudio = null, previousSubtitle = null;
         if (r.HasReport && !dryRun
             && r.StartedAt is { } started && (now - started).TotalSeconds > Math.Max(0, manualAfterSeconds))
@@ -222,18 +242,25 @@ public sealed class PlaybackMonitor : IHostedService
                 }
 
                 r.HasExpected = true;
+                var order = ManualChangeOrder.Next();
                 if (audioChanged)
                 {
                     r.ExpectedAudio = audio;
                     r.ManualAudioChanged = true;
                     r.ManualAudioRevision++;
+                    r.ManualAudioOrder = order;
+                    if (r.HoldAudioChange(audio, previousAudio, now, order)) held = true;
+                    else dropped = true;
                 }
                 if (subtitleChanged)
                 {
                     r.ExpectedSubtitle = subtitle;
                     r.ManualSubtitleChanged = true;
                     r.ManualSubtitleRevision++;
+                    r.ManualSubtitleOrder = order;
                     r.LastSubtitleChangedAt = now;
+                    if (r.HoldSubtitleChange(subtitle, previousSubtitle, now, order)) held = true;
+                    else dropped = true;
                 }
             }
         }
@@ -265,7 +292,22 @@ public sealed class PlaybackMonitor : IHostedService
         r.LastReportedAudio = audio ?? r.LastReportedAudio;
         r.LastReportedSubtitle = subtitle ?? r.LastReportedSubtitle;
         r.HasReport = true;
-        return new ReportPlan(sendAudio, sendSubtitle, manual, audio ?? previousAudio, subtitle ?? previousSubtitle, previousAudio, previousSubtitle);
+
+        // A held change settles on a report that names its track at least SettlePeriod after it was selected.
+        SettledChange? settled = null;
+        if (dryRun)
+        {
+            // Nothing is remembered in a dry run.
+            r.PendingAudio = null;
+            r.PendingSubtitle = null;
+        }
+        else
+        {
+            settled = r.TakeSettled(now, audio.HasValue, subtitle.HasValue, out var gone);
+            dropped |= gone;
+        }
+
+        return new ReportPlan(sendAudio, sendSubtitle, manual, audio ?? previousAudio, subtitle ?? previousSubtitle, previousAudio, previousSubtitle, settled, held, dropped);
     }
 
     /// <inheritdoc />
@@ -363,13 +405,15 @@ public sealed class PlaybackMonitor : IHostedService
         try
         {
             var session = e?.Session;
-            if (session is null || string.IsNullOrEmpty(session.Id) || !Config().Enabled)
+            var config = Config();
+            if (session is null || string.IsNullOrEmpty(session.Id) || !config.Enabled)
             {
                 return;
             }
 
             var now = _registry.Now;
             var stopped = e!.Item?.Id ?? session.FullNowPlayingItem?.Id;
+            SettledChange? settled = null;
             _registry.Update(session.Id, r =>
             {
                 var itemId = stopped ?? r.ItemId;
@@ -386,10 +430,16 @@ public sealed class PlaybackMonitor : IHostedService
                 // A different item may already have prepared expectations in this entry: keep them.
                 if (r.ItemId is null || itemId is null || r.ItemId == itemId)
                 {
+                    // A held change still selected at the stop is remembered when it was selected for the settle period.
+                    if (!config.DryRun) settled = r.TakeSettled(now, true, true, out _);
                     r.ResetPlay();
                     r.ItemId = itemId ?? r.ItemId;
                 }
             });
+            if (settled is not null)
+            {
+                RememberSettled(settled, e.Users?.FirstOrDefault(u => u is not null), e.Item);
+            }
         }
         catch (Exception ex)
         {
@@ -403,7 +453,20 @@ public sealed class PlaybackMonitor : IHostedService
         {
             if (e?.SessionInfo?.Id is { Length: > 0 } id)
             {
+                var config = Config();
+                SettledChange? settled = null;
+                if (config.Enabled && !config.DryRun)
+                {
+                    // Without a stop report, a held change counts as selected until the play's last report.
+                    var now = _registry.Now;
+                    _registry.UpdateExisting(id, r => settled = r.TakeSettled(r.LastProgressAt ?? now, true, true, out _));
+                }
+
                 _registry.Remove(id);
+                if (settled is not null)
+                {
+                    RememberSettled(settled, null, null);
+                }
             }
         }
         catch (Exception ex)
@@ -445,10 +508,16 @@ public sealed class PlaybackMonitor : IHostedService
         var subtitle = session.PlayState?.SubtitleStreamIndex;
 
         // 1. The session's entry holds this play: the one it already has, a pending one from PlaybackInfo, or a new one.
+        // A play replaced here ended without a stop report: its held changes settle as they would at a stop.
+        SettledChange? ended = null;
         var current = _registry.Get(session.Id);
-        var adopted = current is not null && current.UserId == userId && current.Playing && current.ItemId == item.Id
-            ? null
-            : _registry.Adopt(session.Id, session.DeviceId, session.Client, item.Id, userId);
+        var same = current is not null && current.UserId == userId && current.Playing && current.ItemId == item.Id;
+        if (!same && current is { Playing: true } && !config.DryRun)
+        {
+            _registry.UpdateExisting(session.Id, r => ended = r.PlayId == current.PlayId ? r.TakeSettled(_registry.Now, true, true, out _) : null);
+        }
+
+        var adopted = same ? null : _registry.Adopt(session.Id, session.DeviceId, session.Client, item.Id, userId);
         var resolveChoice = false;
         var entry = _registry.Update(session.Id, r =>
         {
@@ -456,6 +525,7 @@ public sealed class PlaybackMonitor : IHostedService
                 && !string.Equals(sourceId, r.MediaSourceId, StringComparison.OrdinalIgnoreCase);
             if (sourceChanged || (adopted is null && (r.UserId != userId || r.ItemId != item.Id || (!r.Playing && !r.HasExpected))))
             {
+                if (r.Playing && !config.DryRun) ended ??= r.TakeSettled(_registry.Now, true, true, out _);
                 r.ResetPlay();
                 r.Playing = true;
             }
@@ -475,6 +545,10 @@ public sealed class PlaybackMonitor : IHostedService
                 resolveChoice = true;
             }
         });
+        if (ended is not null)
+        {
+            RememberSettled(ended, user, item);
+        }
 
         // 2. No expected tracks yet (the app never asked PlaybackInfo with this session): Babelfin's choice, or the app's own.
         if (resolveChoice)
@@ -503,22 +577,13 @@ public sealed class PlaybackMonitor : IHostedService
 
         // 3. The report itself.
         var plan = default(ReportPlan);
-        ManualChangeOrder? order = null;
         var capabilities = session.Capabilities?.SupportedCommands;
         var now = _registry.Now;
         var after = _registry.UpdateExisting(session.Id, r =>
         {
             if (r.PlayId == entry.PlayId)
             {
-                var audioRevision = r.ManualAudioRevision;
-                var subtitleRevision = r.ManualSubtitleRevision;
                 plan = Evaluate(r, audio, subtitle, now, config.CorrectAfterStart, config.ManualChangeAfterSeconds, config.DryRun, capabilities);
-                if (plan.Manual)
-                {
-                    order = ManualChangeOrder.Next();
-                    if (r.ManualAudioRevision != audioRevision) r.ManualAudioOrder = order;
-                    if (r.ManualSubtitleRevision != subtitleRevision) r.ManualSubtitleOrder = order;
-                }
             }
         });
         if (after is null || after.PlayId != entry.PlayId) return;
@@ -528,10 +593,27 @@ public sealed class PlaybackMonitor : IHostedService
             SendCorrection(session, userId, item, after, plan);
         }
 
-        if (plan.Manual)
+        if (plan.Held)
         {
-            user ??= _userManager.GetUserById(userId);
-            if (user is not null) RecordManual(session, user, item, after, plan, order);
+            _logger.LogInformation(
+                "[Babelfin] {Client} changed {Item} to {Audio}/{Subtitle} during play (was {OldAudio}/{OldSubtitle}); remembered if it stays selected for {Seconds} s",
+                session.Client,
+                item.Name,
+                plan.ManualAudio,
+                plan.ManualSubtitle,
+                plan.PreviousAudio,
+                plan.PreviousSubtitle,
+                SettlePeriod.TotalSeconds);
+        }
+
+        if (plan.Dropped)
+        {
+            _logger.LogInformation("[Babelfin] A track change on {Item} in {Client} didn't stay selected for {Seconds} s; not remembered", item.Name, session.Client, SettlePeriod.TotalSeconds);
+        }
+
+        if (plan.Settled is { } settled)
+        {
+            RememberSettled(settled, user, item);
         }
     }
 
@@ -640,15 +722,38 @@ public sealed class PlaybackMonitor : IHostedService
         }
     }
 
-    private void RecordManual(SessionInfo session, User user, BaseItem item, PlayRecord entry, ReportPlan plan, ManualChangeOrder? order)
+    private void RememberSettled(SettledChange change, User? user, BaseItem? item)
     {
-        var source = Source(user, item, entry.MediaSourceId);
+        user = user?.Id == change.UserId ? user : _userManager.GetUserById(change.UserId);
+        item = item is not null && item.Id == change.ItemId ? item : change.ItemId is { } itemId ? _libraryManager.GetItemById(itemId) : null;
+        if (user is null || item is null)
+        {
+            _logger.LogDebug("[Babelfin] A settled track change has no person or item any more; not remembered");
+            return;
+        }
+
+        var source = Source(user, item, change.MediaSourceId);
         if (source is null)
         {
             _logger.LogDebug("[Babelfin] A track change on {Item} has no single media source to describe; not remembered", item.Name);
             return;
         }
 
-        _recorder.Record(user, item, source, plan.ManualAudio, plan.ManualSubtitle, plan.PreviousAudio, plan.PreviousSubtitle, session.Client, order);
+        // Each stream keeps the order in which its own change was observed.
+        if (change.Audio is { } together && change.Subtitle is { } alongside && together.Order == alongside.Order)
+        {
+            _recorder.Record(user, item, source, together.Index, alongside.Index, together.Previous, alongside.Previous, change.Client, together.Order);
+            return;
+        }
+
+        if (change.Audio is { } audio)
+        {
+            _recorder.Record(user, item, source, audio.Index, null, audio.Previous, null, change.Client, audio.Order);
+        }
+
+        if (change.Subtitle is { } subtitle)
+        {
+            _recorder.Record(user, item, source, null, subtitle.Index, null, subtitle.Previous, change.Client, subtitle.Order);
+        }
     }
 }

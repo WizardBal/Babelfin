@@ -26,6 +26,7 @@ public sealed class BabelfinStartupFilter : IStartupFilter
     }
 
     private static Plugin? _watchedPlugin;
+    private static Settings.IPersonStore? _watchedStore;
     private static bool _lastEnabled;
     private static readonly System.Threading.SemaphoreSlim FlagsSync = new(1, 1);
     private static bool _lastCompatibilityMode;
@@ -90,6 +91,12 @@ public sealed class BabelfinStartupFilter : IStartupFilter
         });
     }
 
+    /// <summary>
+    /// Applies or restores every stored person's Jellyfin remember flags: turned off for a person whose next-episode switch is on while the server and
+    /// the person are enabled, put back from the record otherwise. Runs at startup and whenever the server's Enabled switch changes.
+    /// </summary>
+    /// <param name="services">The root service provider.</param>
+    /// <returns>A task.</returns>
     internal static async System.Threading.Tasks.Task SynchronizeFlagsAsync(IServiceProvider services)
     {
         await FlagsSync.WaitAsync().ConfigureAwait(false);
@@ -102,14 +109,7 @@ public sealed class BabelfinStartupFilter : IStartupFilter
             {
                 try
                 {
-                    var person = store.TryGet(id);
-                    var user = users.GetUserById(id);
-                    if (person is null || user is null) continue;
-                    // Read the latest state after each await so rapid toggles converge to the current choice.
-                    if (Plugin.Instance?.Configuration.Enabled == true && person.Enabled && person.HandleNextEpisode)
-                        await flags.ApplyAsync(user, System.Threading.CancellationToken.None).ConfigureAwait(false);
-                    else if (person.JellyfinChanges is not null)
-                        await flags.RestoreAsync(user, System.Threading.CancellationToken.None).ConfigureAwait(false);
+                    await SynchronizePersonCoreAsync(flags, store, users, id).ConfigureAwait(false);
                 }
                 catch (Exception ex)
                 {
@@ -118,6 +118,77 @@ public sealed class BabelfinStartupFilter : IStartupFilter
             }
         }
         finally { FlagsSync.Release(); }
+    }
+
+    /// <summary>
+    /// People whose settings are created after startup (a new Jellyfin account, or a person seeded on first use) get the same synchronization as
+    /// <see cref="SynchronizeFlagsAsync"/> gives everyone at startup, once per person. Runs in the background and never throws.
+    /// </summary>
+    /// <param name="services">The root service provider.</param>
+    internal static void WatchNewPeople(IServiceProvider services)
+    {
+        if (services.GetService(typeof(Settings.IPersonStore)) is not Settings.IPersonStore store || ReferenceEquals(_watchedStore, store))
+        {
+            return;
+        }
+
+        _watchedStore = store;
+        var known = new System.Collections.Concurrent.ConcurrentDictionary<Guid, bool>();
+        try
+        {
+            foreach (var id in store.UserIds()) known.TryAdd(id, true);
+        }
+        catch (Exception ex)
+        {
+            (services.GetService(typeof(ILogger<BabelfinStartupFilter>)) as ILogger)?.LogError(ex, "[Babelfin] Couldn't list stored people; their remember flags are synchronized when their settings change");
+        }
+
+        store.Changed += (_, e) =>
+        {
+            if (e.UserId is not { } id || known.ContainsKey(id)) return;
+            _ = System.Threading.Tasks.Task.Run(async () =>
+            {
+                try
+                {
+                    // A document must exist first: an account's activation raises the event before its settings are created.
+                    if (store.TryGet(id) is null || !known.TryAdd(id, true)) return;
+                    await SynchronizePersonAsync(services, id).ConfigureAwait(false);
+                }
+                catch (Exception ex)
+                {
+                    (services.GetService(typeof(ILogger<BabelfinStartupFilter>)) as ILogger)?.LogError(ex, "[Babelfin] Couldn't synchronize Jellyfin's remember flags for new person {UserId}", id);
+                }
+            });
+        };
+    }
+
+    /// <summary>Applies or restores one person's Jellyfin remember flags as <see cref="SynchronizeFlagsAsync"/> does for everyone.</summary>
+    /// <param name="services">The root service provider.</param>
+    /// <param name="userId">The person.</param>
+    /// <returns>A task.</returns>
+    internal static async System.Threading.Tasks.Task SynchronizePersonAsync(IServiceProvider services, Guid userId)
+    {
+        await FlagsSync.WaitAsync().ConfigureAwait(false);
+        try
+        {
+            if (services.GetService(typeof(Settings.IRememberFlags)) is not Settings.IRememberFlags flags
+                || services.GetService(typeof(Settings.IPersonStore)) is not Settings.IPersonStore store
+                || services.GetService(typeof(MediaBrowser.Controller.Library.IUserManager)) is not MediaBrowser.Controller.Library.IUserManager users) return;
+            await SynchronizePersonCoreAsync(flags, store, users, userId).ConfigureAwait(false);
+        }
+        finally { FlagsSync.Release(); }
+    }
+
+    private static async System.Threading.Tasks.Task SynchronizePersonCoreAsync(Settings.IRememberFlags flags, Settings.IPersonStore store, MediaBrowser.Controller.Library.IUserManager users, Guid id)
+    {
+        var person = store.TryGet(id);
+        var user = users.GetUserById(id);
+        if (person is null || user is null) return;
+        // Read the latest state after each await so rapid toggles converge to the current choice.
+        if (Plugin.Instance?.Configuration.Enabled == true && person.Enabled && person.HandleNextEpisode)
+            await flags.ApplyAsync(user, System.Threading.CancellationToken.None).ConfigureAwait(false);
+        else if (person.JellyfinChanges is not null)
+            await flags.RestoreAsync(user, System.Threading.CancellationToken.None).ConfigureAwait(false);
     }
 
     /// <inheritdoc />
@@ -135,6 +206,7 @@ public sealed class BabelfinStartupFilter : IStartupFilter
             }
 
             Plugin.Services = app.ApplicationServices;
+            WatchNewPeople(app.ApplicationServices);
             WatchCompatibilityMode(app.ApplicationServices);
             app.UseMiddleware<BabelfinMiddleware>();
             next(app);

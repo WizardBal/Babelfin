@@ -38,10 +38,12 @@ public sealed partial class PlaybackBoundaryAdversarialTests
             Assert.True(secondEntered.Wait(TimeSpan.FromSeconds(10)));
             firstRelease.Set();
             await older;
-            Assert.Equal("fr", Assert.Single(h.Store.TryGet(h.User.Id)!.Overrides).Manual!.Audio!.Language);
+            Assert.Equal(5, h.Registry.Get(h.Session.Id)!.ExpectedAudio);
+            Assert.Empty(h.Store.TryGet(h.User.Id)!.Overrides);
             secondRelease.Set();
             await newer;
             Assert.Equal(1, h.Registry.Get(h.Session.Id)!.ExpectedAudio);
+            h.Settle(h.First, 1, 4);
             Assert.Equal("en", Assert.Single(h.Store.TryGet(h.User.Id)!.Overrides).Manual!.Audio!.Language);
         }
         finally { firstRelease.Set(); secondRelease.Set(); }

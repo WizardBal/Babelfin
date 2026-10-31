@@ -3,6 +3,7 @@ using System.Collections.Generic;
 using System.IO;
 using System.Linq;
 using System.Text.Json;
+using Jellyfin.Plugin.Babelfin.Api;
 using Jellyfin.Plugin.Babelfin.Configuration;
 using Jellyfin.Plugin.Babelfin.Engine.Selection;
 using Jellyfin.Plugin.Babelfin.Settings;
@@ -58,7 +59,7 @@ public sealed class MigrationSafetyTests
             CollectionOrder = new() { collection.ItemId }, Locks = new() { AvoidCommentary = false }, UseEverydayEverywhere = true,
             Everyday = new() { OriginalSource = OriginalLanguageSource.FlagThenMetadata } };
         PersonStore.Migrate(doc);
-        Assert.Equal(3, doc.SchemaVersion);
+        Assert.Equal(PersonSettings.CurrentSchemaVersion, doc.SchemaVersion);
         var active = Assert.Single(doc.SmartRules);
         Assert.Equal("Animation", active.Name);
         Assert.Equal(SubtitleWant.Full, active.Settings.WhenAudioNotUnderstood);
@@ -110,10 +111,86 @@ public sealed class MigrationSafetyTests
             var doc = store.TryGet(id)!;
             Assert.True(doc.Locks.IsEmpty);
             Assert.Equal(json, File.ReadAllText(Assert.Single(Directory.GetFiles(Path.GetDirectoryName(store.FilePath(id))!, "*.bak"))));
-            Assert.Equal(3, new PersonStore(folder, NullLogger<PersonStore>.Instance).TryGet(id)!.SchemaVersion);
+            Assert.Equal(PersonSettings.CurrentSchemaVersion, new PersonStore(folder, NullLogger<PersonStore>.Instance).TryGet(id)!.SchemaVersion);
             Assert.Single(Directory.GetFiles(Path.GetDirectoryName(store.FilePath(id))!, "*.bak"));
         }
         finally { if (Directory.Exists(folder)) Directory.Delete(folder, true); }
+    }
+
+    [Theory]
+    [InlineData(1, false)]
+    [InlineData(2, false)]
+    [InlineData(3, false)]
+    [InlineData(3, true)]
+    public void Schema4TurnsTheNextEpisodeSwitchOnOnce_AndKeepsALaterOff(int schema, bool stored)
+    {
+        var doc = new PersonSettings { SchemaVersion = schema, HandleNextEpisode = stored };
+        Assert.True(PersonMigrations.Upgrade(doc));
+        Assert.True(doc.HandleNextEpisode);
+        Assert.Equal(PersonSettings.CurrentSchemaVersion, doc.SchemaVersion);
+        Assert.Empty(doc.MigrationNotes);
+        doc.HandleNextEpisode = false;
+        Assert.False(PersonMigrations.Upgrade(doc));
+        PersonStore.Migrate(doc);
+        Assert.False(doc.HandleNextEpisode);
+    }
+
+    [Fact]
+    public void Schema3DocumentsDoNotActivateArchivedGenreRowsAgain()
+    {
+        var removed = new SmartRule { Id = "removed", Name = "Animation", Conditions = new() { new() { Kind = ConditionKind.Genre, Values = new() { "Animation" } } }, Settings = new() { WhenAudioNotUnderstood = SubtitleWant.Full } };
+        var doc = new PersonSettings { SchemaVersion = 3 };
+        doc.Retired.GenreRules.Add(removed);
+        PersonStore.Migrate(doc);
+        Assert.Empty(doc.SmartRules);
+        Assert.Single(doc.Retired.GenreRules);
+        Assert.Empty(doc.MigrationNotes);
+        Assert.Equal(PersonSettings.CurrentSchemaVersion, doc.SchemaVersion);
+    }
+
+    [Fact]
+    public void StoredFilesTurnTheNextEpisodeSwitchOnOnce_AndASavedOffSurvivesReload()
+    {
+        var folder = Path.Combine(Path.GetTempPath(), "bf-migration-" + Guid.NewGuid().ToString("N"));
+        try
+        {
+            var store = new PersonStore(folder, NullLogger<PersonStore>.Instance);
+            var id = Guid.NewGuid();
+            Directory.CreateDirectory(Path.GetDirectoryName(store.FilePath(id))!);
+            var json = "{\"schemaVersion\":3,\"handleNextEpisode\":false}";
+            File.WriteAllText(store.FilePath(id), json);
+            Assert.True(store.TryGet(id)!.HandleNextEpisode);
+            Assert.Equal(json, File.ReadAllText(Assert.Single(Directory.GetFiles(Path.GetDirectoryName(store.FilePath(id))!, "*.schema-3-*.bak"))));
+            Assert.True(new PersonStore(folder, NullLogger<PersonStore>.Instance).TryGet(id)!.HandleNextEpisode);
+
+            Assert.True(store.Update(id, current => { var copy = current!.Clone(); copy.HandleNextEpisode = false; return copy; }));
+            var reloaded = new PersonStore(folder, NullLogger<PersonStore>.Instance).TryGet(id)!;
+            Assert.False(reloaded.HandleNextEpisode);
+            Assert.Equal(PersonSettings.CurrentSchemaVersion, reloaded.SchemaVersion);
+            Assert.Single(Directory.GetFiles(Path.GetDirectoryName(store.FilePath(id))!, "*.bak"));
+
+            // A current document without the field gets the default.
+            var unset = Guid.NewGuid();
+            File.WriteAllText(store.FilePath(unset), "{\"schemaVersion\":" + PersonSettings.CurrentSchemaVersion + "}");
+            Assert.True(new PersonStore(folder, NullLogger<PersonStore>.Instance).TryGet(unset)!.HandleNextEpisode);
+        }
+        finally { if (Directory.Exists(folder)) Directory.Delete(folder, true); }
+    }
+
+    [Theory]
+    [InlineData(3, true)]
+    [InlineData(PersonSettings.CurrentSchemaVersion, false)]
+    public void ImportedPeopleGetTheSameOneTimeNextEpisodeSwitch(int schema, bool expected)
+    {
+        var person = new PersonSettings { UserId = Guid.NewGuid(), UserName = "Importer", SchemaVersion = schema, HandleNextEpisode = false };
+        var admin = new PluginConfiguration { ConfigVersion = PluginConfiguration.CurrentVersion };
+        var export = ImportPlanner.BuildExport(admin, new[] { person }, "test", DateTime.UtcNow);
+        var store = new Babelfin.Engine.Tests.Settings.FakePersonStore();
+        var result = ImportPlanner.Run(export, admin, new[] { new ImportTargetUser(person.UserId, person.UserName!) }, store,
+            Jellyfin.Plugin.Babelfin.Engine.Languages.LanguageTable.Default, _ => { }, false);
+        Assert.True(result.Applied, string.Join("; ", result.Warnings));
+        Assert.Equal(expected, store.TryGet(person.UserId)!.HandleNextEpisode);
+        Assert.Equal(PersonSettings.CurrentSchemaVersion, store.TryGet(person.UserId)!.SchemaVersion);
     }
 
     [Fact]

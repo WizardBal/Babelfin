@@ -38,6 +38,7 @@ public sealed class PlaybackSafetyTests
     [InlineData("jellyfin media player", true)]
     [InlineData(" Jellyfin Desktop ", true)]
     [InlineData("Jellyfin Android", true)]
+    [InlineData("Jellyfin for Android", true)]
     [InlineData("Android TV", false)]
     [InlineData("Streamyfin", false)]
     [InlineData("Swiftfin", false)]
@@ -68,7 +69,7 @@ public sealed class PlaybackSafetyTests
     [InlineData(false, true, PlaybackInfoOutcome.Manual)]
     public void NonwebPreplayPicksAreNotRememberedButInPlayChangesAre(bool remember, bool repeat, PlaybackInfoOutcome expected)
     {
-        var facts = new PlaybackInfoFacts(true, repeat, true, true, true, AppModeKind.ReplaceUnlessManual, false, true, remember);
+        var facts = new PlaybackInfoFacts(true, repeat, true, true, true, AppModeKind.ReplaceUnlessManual, false, remember);
         Assert.Equal(expected, PlaybackInfoFilter.Decide(facts));
     }
 
@@ -78,14 +79,14 @@ public sealed class PlaybackSafetyTests
     [InlineData(false, true, PlaybackInfoOutcome.Replace)]
     public void FreshPreplayChoiceWinsInsideAutoplayWindow(bool remember, bool fresh, PlaybackInfoOutcome expected)
     {
-        var facts = new PlaybackInfoFacts(true, false, false, true, true, AppModeKind.ReplaceOnAutoplay, true, true, remember, fresh);
+        var facts = new PlaybackInfoFacts(true, false, false, true, true, AppModeKind.ReplaceOnAutoplay, true, remember, fresh);
         Assert.Equal(expected, PlaybackInfoFilter.Decide(facts));
     }
 
     [Fact]
     public void FreshServedChangeIsRememberedEvenWhenCurrentDecisionAlreadyMatches()
     {
-        var facts = new PlaybackInfoFacts(true, false, false, true, false, AppModeKind.ReplaceOnAutoplay, true, false, true, true);
+        var facts = new PlaybackInfoFacts(true, false, false, true, false, AppModeKind.ReplaceOnAutoplay, true, true, true);
         Assert.Equal(PlaybackInfoOutcome.Manual, PlaybackInfoFilter.Decide(facts));
         Assert.Equal(PlaybackInfoOutcome.Manual, PlaybackInfoFilter.Decide(facts with { AutoplayWindowHit = false, DiffersFromChoice = true, FreshServedChoice = false }));
     }
@@ -99,8 +100,77 @@ public sealed class PlaybackSafetyTests
     {
         var entry = new PlayRecord { LastStoppedAt = T0 };
         var served = Record(T0.AddSeconds(servedOffsetSeconds));
-        Assert.Equal(expected, PlaybackInfoFilter.IsFreshPrePlayChoice(served, entry, autoplay));
-        Assert.False(PlaybackInfoFilter.IsFreshPrePlayChoice(null, entry, autoplay));
+        Assert.Equal(expected, PlaybackInfoFilter.IsFreshPrePlayChoice(served, entry, autoplay, T0.AddSeconds(30)));
+        Assert.False(PlaybackInfoFilter.IsFreshPrePlayChoice(null, entry, autoplay, T0.AddSeconds(30)));
+    }
+
+    [Fact]
+    public void AutoplayPickerIsUsableOnceServedPickerUseTimeBeforeTheRequest()
+    {
+        var entry = new PlayRecord { LastStoppedAt = T0 };
+        var served = Record(T0.AddSeconds(10));
+        var edge = served.At + PlaybackInfoFilter.PickerUseTime;
+        Assert.False(PlaybackInfoFilter.IsFreshPrePlayChoice(served, entry, true, served.At));
+        Assert.False(PlaybackInfoFilter.IsFreshPrePlayChoice(served, entry, true, edge.AddMilliseconds(-1)));
+        Assert.True(PlaybackInfoFilter.IsFreshPrePlayChoice(served, entry, true, edge));
+        Assert.True(PlaybackInfoFilter.IsFreshPrePlayChoice(served, entry, true, edge.AddMinutes(1)));
+    }
+
+    [Fact]
+    public void AutoplayPickerCanBeTheServeBeforeTheNextItemFetch()
+    {
+        var entry = new PlayRecord { LastStoppedAt = T0 };
+        var request = T0.AddSeconds(60);
+        var fetch = request.AddSeconds(-1);
+        var opened = T0.AddSeconds(30);
+        Assert.True(PlaybackInfoFilter.IsFreshPrePlayChoice(Record(fetch) with { PreviousServedAt = opened }, entry, true, request));
+        Assert.True(PlaybackInfoFilter.IsFreshPrePlayChoice(Record(fetch) with { PreviousServedAt = request - PlaybackInfoFilter.PickerUseTime }, entry, true, request));
+        Assert.False(PlaybackInfoFilter.IsFreshPrePlayChoice(Record(fetch) with { PreviousServedAt = request.AddSeconds(-2) }, entry, true, request));
+        Assert.False(PlaybackInfoFilter.IsFreshPrePlayChoice(Record(fetch) with { PreviousServedAt = T0.AddSeconds(-30) }, entry, true, request));
+        Assert.False(PlaybackInfoFilter.IsFreshPrePlayChoice(Record(fetch) with { PreviousServedAt = T0 }, entry, true, request));
+        Assert.False(PlaybackInfoFilter.IsFreshPrePlayChoice(Record(fetch), entry, true, request));
+        Assert.False(PlaybackInfoFilter.IsFreshPrePlayChoice(Record(fetch) with { PreviousServedAt = opened }, new PlayRecord(), true, request));
+        Assert.False(PlaybackInfoFilter.IsFreshPrePlayChoice(Record(fetch) with { PreviousServedAt = opened }, entry, true, request, switching: true));
+    }
+
+    [Theory]
+    [InlineData(-60)]
+    [InlineData(-1)]
+    [InlineData(0)]
+    [InlineData(1)]
+    public void OutsideAutoplayAnyServedPickerIsFreshRegardlessOfTiming(int servedOffsetSeconds)
+    {
+        var entry = new PlayRecord { LastStoppedAt = T0 };
+        var request = T0.AddSeconds(30);
+        var served = Record(request.AddSeconds(servedOffsetSeconds));
+        Assert.True(PlaybackInfoFilter.IsFreshPrePlayChoice(served, entry, false, request));
+        Assert.True(PlaybackInfoFilter.IsFreshPrePlayChoice(served, null, false, request));
+        Assert.False(PlaybackInfoFilter.IsFreshPrePlayChoice(served, entry, false, request, switching: true));
+    }
+
+    [Fact]
+    public void ServedRecordKeepsOnlyTheImmediatelyPreviousServeWithinTheServedWindow()
+    {
+        var now = T0;
+        var stats = new DecoratorStats(() => now);
+        var user = NewUser();
+        var item = Guid.NewGuid();
+        var source = Source("a");
+        stats.Record(user.Id, item, source.Id, Record(T0), source);
+        stats.RecordResponse(user.Id, source, "device", "Jellyfin Web");
+        Assert.Null(stats.GetServed(user.Id, item, source.Id, "device", "Jellyfin Web")!.PreviousServedAt);
+        now = T0.AddMinutes(1);
+        stats.RecordResponse(user.Id, source, "device", "Jellyfin Web");
+        now = T0.AddMinutes(2);
+        stats.RecordResponse(user.Id, source, "device", "Jellyfin Web");
+        var served = stats.GetServed(user.Id, item, source.Id, "device", "Jellyfin Web")!;
+        Assert.Equal(T0.AddMinutes(2), served.At);
+        Assert.Equal(T0.AddMinutes(1), served.PreviousServedAt);
+        stats.RecordResponse(user.Id, source, "other-device", "Jellyfin Web");
+        Assert.Null(stats.GetServed(user.Id, item, source.Id, "other-device", "Jellyfin Web")!.PreviousServedAt);
+        now = T0.AddMinutes(33);
+        stats.RecordResponse(user.Id, source, "device", "Jellyfin Web");
+        Assert.Null(stats.GetServed(user.Id, item, source.Id, "device", "Jellyfin Web")!.PreviousServedAt);
     }
 
     [Fact]
@@ -238,7 +308,7 @@ public sealed class PlaybackSafetyTests
         Assert.True(PlaybackInfoFilter.IsRepeat(play, item, AppModeKind.ReplaceUnlessManual, T0.AddHours(1)));
         Assert.False(PlaybackInfoFilter.IsRepeat(play, Guid.NewGuid(), AppModeKind.ReplaceUnlessManual, T0.AddHours(1)));
         Assert.False(PlaybackInfoFilter.IsRepeat(play, item, AppModeKind.ReplaceOnAutoplay, T0.AddHours(1)));
-        Assert.Equal(PlaybackInfoOutcome.Manual, PlaybackInfoFilter.Decide(new PlaybackInfoFacts(true, true, true, false, true, AppModeKind.ReplaceUnlessManual, false, true, false)));
+        Assert.Equal(PlaybackInfoOutcome.Manual, PlaybackInfoFilter.Decide(new PlaybackInfoFacts(true, true, true, false, true, AppModeKind.ReplaceUnlessManual, false, false)));
     }
 
     [Fact]

@@ -250,11 +250,10 @@ public interface IRememberFlags
     /// <summary>Stops accepting changes to Jellyfin's remember flags for this service instance.</summary>
     void StopWrites();
 
-    /// <summary>Restores every person's flags, preserving their next-episode preference when the plugin is temporarily disabled.</summary>
+    /// <summary>Restores every person's flags and clears their records, leaving each person's next-episode preference as stored.</summary>
     /// <param name="cancellationToken">Cancellation.</param>
-    /// <param name="turnSwitchOff">Whether to clear the next-episode preference as part of uninstall; false for temporary disable.</param>
     /// <returns>A task.</returns>
-    Task RestoreAllAsync(CancellationToken cancellationToken, bool turnSwitchOff = true);
+    Task RestoreAllAsync(CancellationToken cancellationToken);
 }
 
 /// <summary>One live play as the registry sees it, for the dashboard.</summary>
