@@ -14,9 +14,10 @@ using Microsoft.Extensions.Logging;
 namespace Jellyfin.Plugin.Babelfin.Compat;
 
 /// <summary>
-/// The person's "let Babelfin handle next-episode tracks" switch: turns off their Jellyfin
-/// "remember audio selections" and "remember subtitle selections", keeping the old values in <see cref="PersonSettings.JellyfinChanges"/>,
-/// and writes them back when the switch goes off or the plugin is uninstalled.
+/// The person's "let Babelfin handle next-episode tracks" switch (on by default): turns off their Jellyfin
+/// "remember audio selections" and "remember subtitle selections" (shown in Jellyfin as "Set audio track based on previous item" and
+/// "Set subtitle track based on previous item"), keeping the old values in <see cref="PersonSettings.JellyfinChanges"/>,
+/// and writes them back when the switch goes off, Babelfin is disabled for the person or the server, or the plugin is uninstalled.
 /// </summary>
 /// <remarks>
 /// Behavior:
@@ -29,9 +30,9 @@ namespace Jellyfin.Plugin.Babelfin.Compat;
 /// Jellyfin is not called.</item>
 /// <item>A restore writes only the flags that were recorded (a null stays as it is now), then clears the record. If Jellyfin can't be
 /// updated the record is kept, so a later restore (or the uninstall) tries again.</item>
-/// <item><see cref="RestoreAllAsync"/> closes admission to flag writes. Uninstall also turns
-/// <see cref="PersonSettings.HandleNextEpisode"/> off; temporary disable passes <c>turnSwitchOff: false</c>
-/// so re-enabling can resume the person's saved preference.</item>
+/// <item><see cref="RestoreAllAsync"/> closes admission to flag writes and leaves every person's
+/// <see cref="PersonSettings.HandleNextEpisode"/> as stored, for uninstall and temporary disable alike, so a reinstall or a re-enable
+/// resumes each person's saved preference.</item>
 /// <item>Each change is an activity entry (<c>jellyfin-setting-changed</c> / <c>restored</c>) for the person. Calls are serialised; nothing throws.</item>
 /// </list>
 /// </remarks>
@@ -145,7 +146,7 @@ public sealed class RememberFlags : IRememberFlags
                 ActivityKinds.JellyfinSettingChanged,
                 user.Id,
                 null,
-                "Babelfin turned off Jellyfin's \"remember audio and subtitle selections\" for you, so it can choose next-episode tracks",
+                "Babelfin turned off Jellyfin's \"Set audio track based on previous item\" and \"Set subtitle track based on previous item\" for you, so Babelfin's choices apply to every episode",
                 new Dictionary<string, string>
                 {
                     ["rememberAudioSelections"] = Format(before.Audio),
@@ -177,7 +178,7 @@ public sealed class RememberFlags : IRememberFlags
         await _gate.WaitAsync(cancellationToken).ConfigureAwait(false);
         try
         {
-            await RestoreCoreAsync(user, turnSwitchOff: false).ConfigureAwait(false);
+            await RestoreCoreAsync(user).ConfigureAwait(false);
         }
         finally
         {
@@ -189,7 +190,7 @@ public sealed class RememberFlags : IRememberFlags
     public void StopWrites() => Interlocked.Exchange(ref _writesStopped, 1);
 
     /// <inheritdoc />
-    public async Task RestoreAllAsync(CancellationToken cancellationToken, bool turnSwitchOff = true)
+    public async Task RestoreAllAsync(CancellationToken cancellationToken)
     {
         StopWrites();
         await _gate.WaitAsync(cancellationToken).ConfigureAwait(false);
@@ -205,7 +206,7 @@ public sealed class RememberFlags : IRememberFlags
                 }
 
                 var doc = _store.TryGet(id);
-                if (doc is null || (doc.JellyfinChanges is null && !doc.HandleNextEpisode))
+                if (doc?.JellyfinChanges is null)
                 {
                     continue;
                 }
@@ -216,7 +217,7 @@ public sealed class RememberFlags : IRememberFlags
                     continue;
                 }
 
-                if (await RestoreCoreAsync(user, turnSwitchOff).ConfigureAwait(false))
+                if (await RestoreCoreAsync(user).ConfigureAwait(false))
                 {
                     count++;
                 }
@@ -236,7 +237,7 @@ public sealed class RememberFlags : IRememberFlags
 
     private static string Format(bool value) => value.ToString(CultureInfo.InvariantCulture).ToLowerInvariant();
 
-    private async Task<bool> RestoreCoreAsync(User user, bool turnSwitchOff)
+    private async Task<bool> RestoreCoreAsync(User user)
     {
         try
         {
@@ -264,7 +265,7 @@ public sealed class RememberFlags : IRememberFlags
                     ActivityKinds.Restored,
                     user.Id,
                     null,
-                    "Babelfin put back your Jellyfin \"remember audio and subtitle selections\" settings",
+                    "Babelfin put back your Jellyfin \"Set audio track based on previous item\" and \"Set subtitle track based on previous item\" settings",
                     new Dictionary<string, string>
                     {
                         ["rememberAudioSelections"] = Format(audio),
@@ -273,7 +274,7 @@ public sealed class RememberFlags : IRememberFlags
                     }));
             }
 
-            if (changes is not null || (turnSwitchOff && stored.HandleNextEpisode))
+            if (changes is not null)
             {
                 _store.Update(user.Id, current =>
                 {
@@ -293,11 +294,6 @@ public sealed class RememberFlags : IRememberFlags
 
                     var doc = current.Clone();
                     doc.JellyfinChanges = null;
-                    if (turnSwitchOff)
-                    {
-                        doc.HandleNextEpisode = false;
-                    }
-
                     return doc;
                 });
             }

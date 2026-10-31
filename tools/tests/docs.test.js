@@ -45,17 +45,43 @@ test('public prose avoids observer and maintainer narrative', () => {
     for (const file of files) assert.doesNotMatch(read(file), observerVoice, file);
 });
 
-test('first public beta notes do not prescribe an upgrade from private releases', () => {
-    assert.match(changelog, /^## \S+ — First public beta$/m);
-    assert.match(release.changelog, /^First public beta[.:]/);
+test('release notes describe the current release, keep the first beta as history and prescribe no upgrade from private releases', () => {
+    const current = section(changelog, 'v0.20.0-beta.1 — Track choices across autoplay and native players');
+    assert.match(release.changelog, /^Track choices across autoplay and native players\./);
+    assert.match(changelog, /^## v0\.19\.0-beta\.1 — First public beta$/m, 'Keep the first public beta as history');
+    assert.ok(changelog.indexOf('## v0.20.0-beta.1') < changelog.indexOf('## v0.19.0-beta.1'), 'List the newest release first');
     for (const notes of [changelog, release.changelog]) {
         assert.doesNotMatch(notes, /Existing installations|previous (?:beta|release)|upgrade from|phase[ -]?b|\bM4\b|0\.14\.0\.0/i);
+    }
+    for (const notes of [current, release.changelog]) {
+        assert.doesNotMatch(notes, /\b(?:I|we|our|you|your)\b|\bpreviously\b|\bthis fix\b/i);
         assert.match(notes, /Android TV, Swiftfin, Streamyfin and physical TVs have not been tested/);
         assert.match(notes, /disposable Jellyfin 12\.2 test instance/);
-        assert.match(notes, /Tested with Jellyfin 12\.4 and the Jellyfin Android app on Google Pixel 11 Pro XL/);
+        assert.match(notes, /download all settings before installing/i);
     }
+    assert.match(current, /Tested with Jellyfin 12\.4, the Jellyfin Android app 2\.7\.3 on Google Pixel 11 Pro XL and Jellyfin Desktop 2\.0\.0 on Linux/);
+    assert.match(release.changelog, /Tested with Jellyfin 12\.4 and the Jellyfin Android app on Google Pixel 11 Pro XL\./);
+    assert.match(release.changelog, /Jellyfin Desktop 2\.0\.0 was also tested on Linux\./);
+    assert.match(section(changelog, 'v0.19.0-beta.1 — First public beta'), /Tested with Jellyfin 12\.4 and the Jellyfin Android app on Google Pixel 11 Pro XL/);
     assert.match(readme, /New catalog installations allow automatic plugin updates/);
     assert.match(readme, /Manual installation/);
+});
+
+test('release version, tag and file names agree across the project, README, release config and workflow', () => {
+    const version = /<Version>(\d+\.\d+\.\d+\.0)<\/Version>/.exec(read('plugin/src/Jellyfin.Plugin.Babelfin/Jellyfin.Plugin.Babelfin.csproj'));
+    assert.ok(version, 'The project needs a literal four-part version ending in .0');
+    const tag = 'v' + version[1].replace(/\.0$/, '') + '-beta.1';
+    assert.equal(version[1], '0.20.0.0');
+    assert.ok(read('plugin/src/Jellyfin.Plugin.Babelfin/Assets/client.js').includes("FALLBACK_VERSION = '" + version[1] + "';"), 'client.js fallback version');
+    assert.ok(readme.includes('**' + version[1] + ' — Beta (`' + tag + '`)**'), 'README version header');
+    assert.equal(release.source_url, 'https://github.com/WizardBal/Babelfin/releases/download/' + tag + '/Babelfin-' + version[1] + '.zip');
+    assert.ok(workflow.includes('--tag ' + tag + ' '), 'Workflow source archive tag');
+    assert.ok(readme.includes('/releases/tag/' + tag + ')') && readme.includes('--tag ' + tag + ' '), 'README release links');
+    assert.ok(changelog.startsWith('# Changelog\n\n## ' + tag + ' — '), 'The newest CHANGELOG section is the current tag');
+    for (const document of [readme, workflow]) {
+        assert.ok(document.includes('Babelfin-' + version[1] + '.zip'), 'Current ZIP name');
+        assert.doesNotMatch(document, /Babelfin[-_]0\.(?!20\.0\.0)\d+\.\d+\.\d+/, 'No other version in file names');
+    }
 });
 
 test('API documentation belongs to development, with screenshot content kept together', () => {
@@ -261,13 +287,16 @@ test('native policy source comments retain attribution and point to reproducible
     assert.doesNotMatch(header, /Oracle binary SHA256:|Policy oracle: \.rig\//);
 });
 
-test('package fallback and catalog share a plain first-public-beta feature summary', () => {
+test('package fallback and catalog share a plain feature summary of the current release', () => {
     const declaration = /DEFAULT_CHANGELOG = \(([\s\S]*?)\n\)/.exec(read('tools/package.py'));
     assert.ok(declaration, 'The package fallback must be a visible literal summary');
     const fallback = [...declaration[1].matchAll(/"(?:\\.|[^"\\])*"/g)].map(match => JSON.parse(match[0])).join('');
     assert.equal(fallback, release.changelog);
-    assert.match(fallback, /^First public beta[.:]/);
-    assert.match(fallback, /library and genre/);
+    assert.match(fallback, /^Track choices across autoplay and native players\./);
+    assert.match(fallback, /Use Babelfin's choice when playing the next episode/);
+    assert.match(fallback, /Set audio track based on previous item/);
+    assert.match(fallback, /Set subtitle track based on previous item/);
+    assert.match(fallback, /remembered once it has stayed selected for 10 seconds/);
     assert.match(fallback, /Android TV, Swiftfin, Streamyfin and physical TVs have not been tested/);
     assert.doesNotMatch(fallback, /\b(?:fixed|safer|previous release|internal|checkpoint)\b/i);
 });
@@ -311,14 +340,14 @@ test('Linux release package and upload preserve seven verified files', () => {
     assert.ok(build && verify && upload);
     assert.match(build, /python tools\/package\.py/);
     assert.match(build, /python tools\/source_archive\.py/);
-    assert.match(build, /--tag v0\.19\.0-beta\.1/);
+    assert.match(build, /--tag v0\.20\.0-beta\.1/);
     assert.match(build, /cp NOTICE/);
-    assert.match(build, /sha256sum -c Babelfin-0\.19\.0\.0\.zip\.sha256 Babelfin-0\.19\.0\.0-source\.zip\.sha256/);
+    assert.match(build, /sha256sum -c Babelfin-0\.20\.0\.0\.zip\.sha256 Babelfin-0\.20\.0\.0-source\.zip\.sha256/);
     assert.match(build, /sha256sum --binary/);
     assert.match(verify, /if current != recorded:/);
     assert.match(verify, /len\(rows\) != len\(files\)/);
     const paths = upload.split('          path: |\n')[1].split(/\n(?=\S| {0,10}\S)/)[0].trim().split('\n').map(line => line.trim());
-    assert.deepEqual(paths, ['Babelfin-0.19.0.0.zip', 'Babelfin-0.19.0.0.zip.md5', 'Babelfin-0.19.0.0.zip.sha256', 'manifest.json', 'Babelfin-0.19.0.0-source.zip', 'Babelfin-0.19.0.0-source.zip.sha256', 'NOTICE'].map(name => '${{ runner.temp }}/babelfin-real-package/' + name));
+    assert.deepEqual(paths, ['Babelfin-0.20.0.0.zip', 'Babelfin-0.20.0.0.zip.md5', 'Babelfin-0.20.0.0.zip.sha256', 'manifest.json', 'Babelfin-0.20.0.0-source.zip', 'Babelfin-0.20.0.0-source.zip.sha256', 'NOTICE'].map(name => '${{ runner.temp }}/babelfin-real-package/' + name));
     assert.match(upload, /steps\.verify_release_bytes\.outcome == 'success'/);
     assert.doesNotMatch(workflow, /install-babelfin|integration_installer_docker|test_plugins_inventory/);
 });

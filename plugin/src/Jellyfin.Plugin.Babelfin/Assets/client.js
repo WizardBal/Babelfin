@@ -13,7 +13,7 @@
 
     if (window.Babelfin && window.Babelfin.clientLoaded) { return; }
 
-    var FALLBACK_VERSION = '0.19.0.0';
+    var FALLBACK_VERSION = '0.20.0.0';
     var has = function (o, k) { return Object.prototype.hasOwnProperty.call(o, k); };
 
     function warn(what, err) {

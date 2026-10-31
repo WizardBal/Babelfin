@@ -215,7 +215,9 @@ public enum AppModeKind
     /// <summary>Keep the app's indices (the default for apps not listed).</summary>
     Trust,
 
-    /// <summary>Replace them only when the request is the next item in a queue and they disagree with Babelfin's choice on language or kind.</summary>
+    /// <summary>Replace them only when the request is the next item in a queue and they differ from Babelfin's choice, even when they
+    /// name a track of the same language and kind (the app copies the previous item's track; a person's picks carry over through
+    /// Babelfin's remembered changes).</summary>
     ReplaceOnAutoplay,
 
     /// <summary>Replace them unless the request is a manual choice (a repeat during play, or a change from what Babelfin served).</summary>
@@ -271,7 +273,7 @@ public class LanguageAlias
 public partial class PluginConfiguration : BasePluginConfiguration
 {
     /// <summary>The current settings layout. Older saved settings are upgraded on startup.</summary>
-    public const int CurrentVersion = 8;
+    public const int CurrentVersion = 9;
 
     /// <summary>Gets or sets the settings layout version (used to upgrade older saved settings).</summary>
     public int ConfigVersion { get; set; }
@@ -433,7 +435,8 @@ public partial class PluginConfiguration : BasePluginConfiguration
         return (list ?? Array.Empty<string>()).Where(w => !string.IsNullOrWhiteSpace(w) && seen.Add(w.Trim())).ToList();
     }
 
-    /// <summary>The shipped per-app rows (editable): jellyfin-web apps replace on autoplay; Android TV and Streamyfin replace unless manual (unchecked); the rest trust.</summary>
+    /// <summary>The shipped per-app rows (editable): jellyfin-web apps, including the Android app (which reports itself as
+    /// "Jellyfin for Android"), replace on autoplay; Android TV and Streamyfin replace unless manual (unchecked); the rest trust.</summary>
     /// <returns>The rows.</returns>
     public static List<AppMode> DefaultAppModes() => new()
     {
@@ -441,6 +444,7 @@ public partial class PluginConfiguration : BasePluginConfiguration
         new AppMode { Client = "Jellyfin Media Player", Mode = AppModeKind.ReplaceOnAutoplay },
         new AppMode { Client = "Jellyfin Desktop", Mode = AppModeKind.ReplaceOnAutoplay },
         new AppMode { Client = "Jellyfin Android", Mode = AppModeKind.ReplaceOnAutoplay },
+        new AppMode { Client = "Jellyfin for Android", Mode = AppModeKind.ReplaceOnAutoplay },
         new AppMode { Client = "Android TV", Mode = AppModeKind.ReplaceUnlessManual },
         new AppMode { Client = "Streamyfin", Mode = AppModeKind.ReplaceUnlessManual },
         new AppMode { Client = "Swiftfin", Mode = AppModeKind.Trust },
@@ -601,6 +605,26 @@ public partial class PluginConfiguration : BasePluginConfiguration
         }
 
         if (from < 8) ActivateArchivedGenreRows(legacyGenreOrder);
+
+        if (from >= 1 && from < 9)
+        {
+            // Version 8 -> 9: the Android app reports itself as "Jellyfin for Android", which no shipped row named, so it ran as an
+            // unknown app. A missing row is added as shipped; a row that was only discovered becomes the shipped row (keeping when it
+            // was seen); a row the admin set is kept.
+            var android = FindAppMode("Jellyfin for Android");
+            if (android is null)
+            {
+                AppModes.Add(new AppMode { Client = "Jellyfin for Android", Mode = AppModeKind.ReplaceOnAutoplay });
+            }
+            else if (android.SeenOnly)
+            {
+                android.Mode = AppModeKind.ReplaceOnAutoplay;
+                android.RememberPrePlayChoices = null;
+                android.SeenOnly = false;
+            }
+
+            changed = true;
+        }
 
         SendImportantEventsToJellyfinActivity = null;
 

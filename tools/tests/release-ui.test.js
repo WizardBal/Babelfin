@@ -282,7 +282,7 @@ test('A narrower episode flag does not check the whole-show checkbox', async () 
 test('Detail pages and cached returns render no chip and do not poll choices to display one', async () => {
     for (const c of cases) {
         const r = await browser(c);
-        assert.equal(r.window.Babelfin.version, '0.19.0.0');
+        assert.equal(r.window.Babelfin.version, '0.20.0.0');
         assert.equal(r.document.querySelector('.bfChip'), null, c.type);
         const d = await r.open(); assert.ok(d.querySelector('.bfField'));
         r.window.fire('keydown', { key: 'Escape' }); await r.settle();

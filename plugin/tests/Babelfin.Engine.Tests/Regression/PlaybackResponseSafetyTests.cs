@@ -12,6 +12,7 @@ using Jellyfin.Plugin.Babelfin;
 using Jellyfin.Plugin.Babelfin.Api;
 using Jellyfin.Plugin.Babelfin.Configuration;
 using Jellyfin.Plugin.Babelfin.Decisions;
+using Jellyfin.Plugin.Babelfin.Engine.Classification;
 using Jellyfin.Plugin.Babelfin.Library;
 using Jellyfin.Plugin.Babelfin.Playback;
 using Jellyfin.Plugin.Babelfin.Resolution;
@@ -23,6 +24,7 @@ using MediaBrowser.Controller.Session;
 using MediaBrowser.Model.Dto;
 using MediaBrowser.Model.Entities;
 using MediaBrowser.Model.Serialization;
+using MediaBrowser.Model.Session;
 using Microsoft.AspNetCore.Http;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.AspNetCore.Mvc.Controllers;
@@ -114,6 +116,151 @@ public sealed class PlaybackResponseSafetyTests : IDisposable
             Assert.Equal("en", remembered.Manual!.Audio!.Language);
         }
         else Assert.Empty(fixture.Store.TryGet(fixture.User.Id)!.Overrides);
+    }
+
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task TheNextItemFetchedRightBeforeAnAutoplayRequestIsNotAPickerChoice(bool servedBeforeTheStopToo)
+    {
+        var fixture = Create();
+        if (servedBeforeTheStopToo) fixture.ServeAt(T0.AddSeconds(-600));
+        fixture.StopOtherItem(T0.AddSeconds(-2));
+        fixture.ServeAt(T0.AddSeconds(-1));
+
+        var context = await fixture.Request("Jellyfin Web", 1);
+
+        Assert.Equal(2, context.ActionArguments["audioStreamIndex"]);
+        Assert.Empty(fixture.Store.TryGet(fixture.User.Id)!.Overrides);
+        Assert.False(fixture.Registry.Get("session")!.ManualChanged);
+    }
+
+    [Fact]
+    public async Task APickerOpenedAndRefetchedDuringTheAutoplayWindowIsStillARememberedChoice()
+    {
+        var fixture = Create();
+        fixture.StopOtherItem(T0.AddSeconds(-30));
+        fixture.ServeAt(T0.AddSeconds(-20));
+        fixture.ServeAt(T0.AddSeconds(-1));
+
+        var context = await fixture.Request("Jellyfin Web", 1);
+
+        Assert.Equal(1, context.ActionArguments["audioStreamIndex"]);
+        var remembered = Assert.Single(fixture.Store.TryGet(fixture.User.Id)!.Overrides);
+        Assert.Equal(OverrideScope.Series, remembered.Scope);
+        Assert.Equal(Ids.N(Ids.Series), remembered.ItemId);
+        Assert.Equal("en", remembered.Manual!.Audio!.Language);
+        Assert.True(fixture.Registry.Get("session")!.ManualChanged);
+    }
+
+    [Fact]
+    public async Task AutoplayCarryingOverASignsAndSongsSubtitleIsReplacedWithTheFullOne()
+    {
+        var fixture = Create();
+        fixture.NewSource = SignsAndSongsSource;
+        fixture.Choice = new TrackDecision(2, 3, Array.Empty<string>());
+        fixture.StopOtherItem(T0.AddSeconds(-2));
+        fixture.ServeAt(T0.AddSeconds(-1));
+
+        var context = await fixture.Request("Jellyfin Web", 2, subtitle: 4);
+
+        Assert.Equal(2, context.ActionArguments["audioStreamIndex"]);
+        Assert.Equal(3, context.ActionArguments["subtitleStreamIndex"]);
+        Assert.Empty(fixture.Store.TryGet(fixture.User.Id)!.Overrides);
+        Assert.False(fixture.Registry.Get("session")!.ManualChanged);
+    }
+
+    // The previous episode's full subtitles carried over by position: the same language and kind, but not Babelfin's track.
+    [Fact]
+    public async Task AutoplayCarryingOverAnotherFullSubtitleOfTheSameLanguageIsReplaced()
+    {
+        var fixture = Create();
+        fixture.NewSource = TwoFullSubtitlesSource;
+        fixture.Choice = new TrackDecision(2, 5, Array.Empty<string>());
+        fixture.StopOtherItem(T0.AddSeconds(-2));
+        fixture.ServeAt(T0.AddSeconds(-1));
+
+        var context = await fixture.Request("Jellyfin Web", 2, subtitle: 3);
+
+        Assert.Equal(2, context.ActionArguments["audioStreamIndex"]);
+        Assert.Equal(5, context.ActionArguments["subtitleStreamIndex"]);
+        Assert.Empty(fixture.Store.TryGet(fixture.User.Id)!.Overrides);
+        Assert.False(fixture.Registry.Get("session")!.ManualChanged);
+        Assert.False(fixture.Registry.Get("session")!.Trusted);
+    }
+
+    [Fact]
+    public async Task OutsideAutoplayTheSameRequestIsTheAppsOwnChoice()
+    {
+        var fixture = Create();
+        fixture.NewSource = TwoFullSubtitlesSource;
+        fixture.Choice = new TrackDecision(2, 5, Array.Empty<string>());
+
+        var context = await fixture.Request("Jellyfin Web", 2, subtitle: 3);
+
+        Assert.Equal(2, context.ActionArguments["audioStreamIndex"]);
+        Assert.Equal(3, context.ActionArguments["subtitleStreamIndex"]);
+        Assert.Empty(fixture.Store.TryGet(fixture.User.Id)!.Overrides);
+        Assert.True(fixture.Registry.Get("session")!.Trusted);
+    }
+
+    public static TheoryData<string> CarryOverCases() => new(CarryOvers.Keys);
+
+    public static TheoryData<string> PickCases() => new(Picks.Keys);
+
+    // The app ranks the next item's tracks from the previous item's: a copy can name a track of the same language and kind, or another one.
+    [Theory]
+    [MemberData(nameof(CarryOverCases))]
+    public async Task AutoplayCarryOverInAnyLanguageIsReplacedWithBabelfinsChoice(string carryOver)
+    {
+        var c = CarryOvers[carryOver];
+        var source = c.Source();
+        var (copiedTrack, chosenTrack) = c.Copied.Audio != c.Choice.Audio
+            ? (TrackComparer.Describe(source, c.Copied.Audio, TrackType.Audio), TrackComparer.Describe(source, c.Choice.Audio, TrackType.Audio))
+            : (TrackComparer.Describe(source, c.Copied.Subtitle, TrackType.Subtitle), TrackComparer.Describe(source, c.Choice.Subtitle, TrackType.Subtitle));
+        Assert.Equal(c.SameLanguageAndKind, copiedTrack is { } copied && chosenTrack is { } chosen
+            && (copied.Language, copied.Variety, copied.Kind) == (chosen.Language, chosen.Variety, chosen.Kind));
+
+        var fixture = Create();
+        fixture.NewSource = c.Source;
+        fixture.Choice = new TrackDecision(c.Choice.Audio, c.Choice.Subtitle, Array.Empty<string>());
+        fixture.StopOtherItem(T0.AddSeconds(-2));
+        fixture.ServeAt(T0.AddSeconds(-1));
+
+        var context = await fixture.Request("Jellyfin Web", c.Copied.Audio, subtitle: c.Copied.Subtitle);
+
+        Assert.Equal(c.Choice.Audio, context.ActionArguments["audioStreamIndex"]);
+        Assert.Equal(c.Choice.Subtitle, context.ActionArguments["subtitleStreamIndex"]);
+        Assert.Empty(fixture.Store.TryGet(fixture.User.Id)!.Overrides);
+        Assert.False(fixture.Registry.Get("session")!.ManualChanged);
+    }
+
+    [Theory]
+    [MemberData(nameof(PickCases))]
+    public async Task APickerChoiceInAnyLanguageDuringTheAutoplayWindowIsRemembered(string pick)
+    {
+        var p = Picks[pick];
+        var fixture = Create();
+        fixture.NewSource = p.Source;
+        fixture.Choice = new TrackDecision(p.Choice.Audio, p.Choice.Subtitle, Array.Empty<string>());
+        fixture.StopOtherItem(T0.AddSeconds(-30));
+        fixture.ServeAt(T0.AddSeconds(-20));
+        fixture.ServeAt(T0.AddSeconds(-1));
+
+        var context = await fixture.Request("Jellyfin Web", p.Picked.Audio, subtitle: p.Picked.Subtitle);
+
+        Assert.Equal(p.Picked.Audio, context.ActionArguments["audioStreamIndex"]);
+        Assert.Equal(p.Picked.Subtitle, context.ActionArguments["subtitleStreamIndex"]);
+        var remembered = Assert.Single(fixture.Store.TryGet(fixture.User.Id)!.Overrides);
+        Assert.Equal(OverrideScope.Series, remembered.Scope);
+        Assert.Equal(Ids.N(Ids.Series), remembered.ItemId);
+        var manual = remembered.Manual!;
+        var (track, unchanged) = p.Changed == TrackType.Audio ? (manual.Audio, manual.Subtitle) : (manual.Subtitle, manual.Audio);
+        Assert.Null(unchanged);
+        Assert.False(manual.SubtitlesOff);
+        Assert.NotNull(track);
+        Assert.Equal(p.Remembered, (track.Language, track.Variety, track.Kind));
+        Assert.True(fixture.Registry.Get("session")!.ManualChanged);
     }
 
     [Theory]
@@ -213,8 +360,11 @@ public sealed class PlaybackResponseSafetyTests : IDisposable
         });
         var context = await fixture.Request("Jellyfin Web", 1);
         Assert.Equal(1, context.ActionArguments["audioStreamIndex"]);
-        Assert.Equal(OverrideScope.Series, Assert.Single(fixture.Store.TryGet(fixture.User.Id)!.Overrides).Scope);
         Assert.True(fixture.Registry.Get("session")!.ManualChanged);
+        Assert.Empty(fixture.Store.TryGet(fixture.User.Id)!.Overrides);
+        fixture.SetTime(T0 + PlaybackMonitor.SettlePeriod);
+        fixture.Report(1, -1);
+        Assert.Equal(OverrideScope.Series, Assert.Single(fixture.Store.TryGet(fixture.User.Id)!.Overrides).Scope);
     }
 
     [Fact]
@@ -288,7 +438,7 @@ public sealed class PlaybackResponseSafetyTests : IDisposable
         if (stopBeforeAdoption)
         {
             fixture.ServeAt(T0.AddSeconds(2));
-            fixture.SetTime(T0.AddSeconds(3));
+            fixture.SetTime(T0.AddSeconds(2) + PlaybackInfoFilter.PickerUseTime);
             await fixture.Request("Jellyfin Web", 1);
             Assert.Equal(1, fixture.Registry.Get("session")!.ExpectedAudio);
             Assert.Single(fixture.Store.TryGet(fixture.User.Id)!.Overrides);
@@ -406,6 +556,114 @@ public sealed class PlaybackResponseSafetyTests : IDisposable
         },
     };
 
+    private static MediaSourceInfo SignsAndSongsSource()
+    {
+        var source = Source();
+        source.MediaStreams = source.MediaStreams.Concat(new[]
+        {
+            new MediaStream { Index = 3, Type = MediaStreamType.Subtitle, Language = "eng", Title = "Full", Codec = "subrip" },
+            new MediaStream { Index = 4, Type = MediaStreamType.Subtitle, Language = "eng", Title = "Signs & Songs", Codec = "subrip" },
+        }).ToList();
+        return source;
+    }
+
+    private static MediaSourceInfo TwoFullSubtitlesSource()
+    {
+        var source = Source();
+        source.MediaStreams = source.MediaStreams.Concat(new[]
+        {
+            new MediaStream { Index = 3, Type = MediaStreamType.Subtitle, Language = "eng", Title = "Full Sub", Codec = "PGSSUB" },
+            new MediaStream { Index = 4, Type = MediaStreamType.Subtitle, Language = "eng", Title = "Signs & Songs", Codec = "ass", IsDefault = true },
+            new MediaStream { Index = 5, Type = MediaStreamType.Subtitle, Language = "eng", Title = "Dialogue", Codec = "ass" },
+        }).ToList();
+        return source;
+    }
+
+    private static readonly Dictionary<string, CarryOver> CarryOvers = new(StringComparer.Ordinal)
+    {
+        ["fr: another full French subtitle"] = new(
+            () => SourceOf(AudioStream(1, "fre", "Français"), AudioStream(2, "jpn", "日本語"), SubtitleStream(3, "fre", "Français"), SubtitleStream(4, "fre", "Français (dialogues)", "ass")),
+            Choice: (2, 4), Copied: (2, 3), SameLanguageAndKind: true),
+        ["de: another German audio (stereo over 5.1)"] = new(
+            () => SourceOf(AudioStream(1, "ger", "Deutsch Stereo"), AudioStream(2, "ger", "Deutsch 5.1", "ac3", 6), AudioStream(3, "jpn", "日本語"), SubtitleStream(4, "ger", "Schilder & Songs", forced: true)),
+            Choice: (2, 4), Copied: (1, 4), SameLanguageAndKind: true),
+        ["es: another full Spanish subtitle (image)"] = new(
+            () => SourceOf(AudioStream(1, "jpn", "日本語"), SubtitleStream(2, "spa", "Español", "PGSSUB"), SubtitleStream(3, "spa", "Español")),
+            Choice: (1, 3), Copied: (1, 2), SameLanguageAndKind: true),
+        ["en audio copied over a Japanese choice"] = new(
+            () => SourceOf(AudioStream(1, "eng", "English"), AudioStream(2, "jpn", "日本語"), SubtitleStream(3, "eng", "Signs & Songs", forced: true), SubtitleStream(4, "eng", "Dialogue")),
+            Choice: (2, 4), Copied: (1, 4), SameLanguageAndKind: false),
+        ["pt-BR subtitles copied over a pt-PT choice"] = new(
+            () => SourceOf(AudioStream(1, "jpn", "日本語"), SubtitleStream(2, "por", "Português (Brasil)"), SubtitleStream(3, "por", "Português (Portugal)")),
+            Choice: (1, 3), Copied: (1, 2), SameLanguageAndKind: false),
+        ["zh-Hans subtitles copied over a zh-Hant choice"] = new(
+            () => SourceOf(AudioStream(1, "jpn", "日本語"), SubtitleStream(2, "chi", "简体"), SubtitleStream(3, "chi", "繁體")),
+            Choice: (1, 3), Copied: (1, 2), SameLanguageAndKind: false),
+        ["de Schilder & Songs over a German full choice"] = new(
+            () => SourceOf(AudioStream(1, "jpn", "日本語"), SubtitleStream(2, "ger", "Schilder & Songs", "ass", forced: true), SubtitleStream(3, "ger", "Vollständig", "ass")),
+            Choice: (1, 3), Copied: (1, 2), SameLanguageAndKind: false),
+        ["en subtitles copied over a Korean choice"] = new(
+            () => SourceOf(AudioStream(1, "kor", "한국어"), SubtitleStream(2, "eng", "English"), SubtitleStream(3, "kor", "한국어")),
+            Choice: (1, 3), Copied: (1, 2), SameLanguageAndKind: false),
+        ["it subtitles copied while Babelfin chose off"] = new(
+            () => SourceOf(AudioStream(1, "ita", "Italiano"), AudioStream(2, "eng", "English"), SubtitleStream(3, "ita", "Italiano")),
+            Choice: (1, -1), Copied: (1, 3), SameLanguageAndKind: false),
+        ["off copied while Babelfin chose French full"] = new(
+            () => SourceOf(AudioStream(1, "jpn", "日本語"), SubtitleStream(2, "fre", "Français")),
+            Choice: (1, 2), Copied: (1, -1), SameLanguageAndKind: false),
+        ["fr audio + Forcés over ja + French Complets"] = new(
+            () => SourceOf(AudioStream(1, "fre", "VF"), AudioStream(2, "jpn", "VO"), SubtitleStream(3, "fre", "Forcés", "ass", forced: true), SubtitleStream(4, "fre", "Complets", "ass")),
+            Choice: (2, 4), Copied: (1, 3), SameLanguageAndKind: false),
+    };
+
+    private static readonly Dictionary<string, Pick> Picks = new(StringComparer.Ordinal)
+    {
+        ["de audio over a French choice"] = new(
+            () => SourceOf(AudioStream(1, "fre", "Français"), AudioStream(2, "ger", "Deutsch")),
+            Choice: (1, -1), Picked: (2, -1), TrackType.Audio, Remembered: ("de", null, "normal")),
+        ["pt-PT audio over a pt-BR choice"] = new(
+            () => SourceOf(AudioStream(1, "por", "Português (Brasil)"), AudioStream(2, "por", "Português (Portugal)")),
+            Choice: (1, -1), Picked: (2, -1), TrackType.Audio, Remembered: ("pt", "pt-PT", "normal")),
+        ["yue audio over a Mandarin choice"] = new(
+            () => SourceOf(AudioStream(1, "chi", "Mandarin"), AudioStream(2, "chi", "Cantonese")),
+            Choice: (1, -1), Picked: (2, -1), TrackType.Audio, Remembered: ("zh", "yue", "normal")),
+        ["zh-Hant subtitles over a zh-Hans choice"] = new(
+            () => SourceOf(AudioStream(1, "jpn", "日本語"), SubtitleStream(2, "chi", "简体"), SubtitleStream(3, "chi", "繁體")),
+            Choice: (1, 2), Picked: (1, 3), TrackType.Subtitle, Remembered: ("zh", "zh-Hant", "full")),
+        ["Spanish Carteles over a Spanish full choice"] = new(
+            () => SourceOf(AudioStream(1, "spa", "Español"), SubtitleStream(2, "spa", "Carteles", "ass", forced: true), SubtitleStream(3, "spa", "Completos", "ass")),
+            Choice: (1, 3), Picked: (1, 2), TrackType.Subtitle, Remembered: ("es", null, "partial")),
+        ["French SDH over a French full choice"] = new(
+            () => SourceOf(AudioStream(1, "jpn", "日本語"), SubtitleStream(2, "fre", "Français"), SubtitleStream(3, "fre", "Français SDH", hearingImpaired: true)),
+            Choice: (1, 2), Picked: (1, 3), TrackType.Subtitle, Remembered: ("fr", null, "sdh")),
+    };
+
+    private static MediaSourceInfo SourceOf(params MediaStream[] streams) => new()
+    {
+        Id = "source", DefaultAudioStreamIndex = 1, DefaultSubtitleStreamIndex = -1, MediaStreams = streams.ToList(),
+    };
+
+    private static MediaStream AudioStream(int index, string language, string title, string codec = "aac", int channels = 2) =>
+        new() { Index = index, Type = MediaStreamType.Audio, Language = language, Title = title, Codec = codec, Channels = channels };
+
+    private static MediaStream SubtitleStream(int index, string language, string title, string codec = "subrip", bool forced = false, bool hearingImpaired = false) =>
+        new() { Index = index, Type = MediaStreamType.Subtitle, Language = language, Title = title, Codec = codec, IsForced = forced, IsHearingImpaired = hearingImpaired };
+
+    /// <summary>An autoplay request naming the previous item's tracks.</summary>
+    /// <param name="Source">The next item's source, new on every call.</param>
+    /// <param name="Choice">Babelfin's choice (subtitle -1 = off).</param>
+    /// <param name="Copied">The indices the app copied from the previous item.</param>
+    /// <param name="SameLanguageAndKind">Whether the copied track that differs has the language, variety and kind of Babelfin's.</param>
+    private sealed record CarryOver(Func<MediaSourceInfo> Source, (int Audio, int Subtitle) Choice, (int Audio, int Subtitle) Copied, bool SameLanguageAndKind);
+
+    /// <summary>A pre-play picker choice that differs from Babelfin's in one track.</summary>
+    /// <param name="Source">The item's source, new on every call.</param>
+    /// <param name="Choice">Babelfin's choice (subtitle -1 = off).</param>
+    /// <param name="Picked">The indices the person picked.</param>
+    /// <param name="Changed">The track the person changed.</param>
+    /// <param name="Remembered">The stored language base, variety and kind of the picked track.</param>
+    private sealed record Pick(Func<MediaSourceInfo> Source, (int Audio, int Subtitle) Choice, (int Audio, int Subtitle) Picked, TrackType Changed, (string Language, string? Variety, string Kind) Remembered);
+
     private sealed class Fixture
     {
         internal readonly CountingPlugin Plugin;
@@ -418,8 +676,11 @@ public sealed class PlaybackResponseSafetyTests : IDisposable
         internal readonly BabelfinMediaSourceManager Manager;
         internal readonly CallProxy Compatibility;
         internal bool FailDecision;
+        internal TrackDecision Choice = new(2, -1, Array.Empty<string>());
+        internal Func<MediaSourceInfo> NewSource = Source;
         private DateTime _now = T0;
         private readonly Func<PlaybackInfoFilter> _newFilter;
+        private readonly PlaybackMonitor _monitor;
 
         internal Fixture(CountingPlugin plugin)
         {
@@ -434,11 +695,11 @@ public sealed class PlaybackResponseSafetyTests : IDisposable
             var recorder = new TrackChangeRecorder(resolver, Store, activity, NullLogger<TrackChangeRecorder>.Instance);
             var inner = CallProxy.Create<IMediaSourceManager>((method, _) => method.Name switch
             {
-                nameof(IMediaSourceManager.GetStaticMediaSources) => new[] { Source() },
-                nameof(IMediaSourceManager.GetPlaybackMediaSources) => Task.FromResult<IReadOnlyList<MediaSourceInfo>>(new[] { Source() }),
+                nameof(IMediaSourceManager.GetStaticMediaSources) => new[] { NewSource() },
+                nameof(IMediaSourceManager.GetPlaybackMediaSources) => Task.FromResult<IReadOnlyList<MediaSourceInfo>>(new[] { NewSource() }),
                 _ => null,
             }).Proxy;
-            var decider = CallProxy.Create<ITrackDecider>((_, _) => FailDecision ? throw new InvalidOperationException("Test decider failure") : new TrackDecision(2, -1, Array.Empty<string>())).Proxy;
+            var decider = CallProxy.Create<ITrackDecider>((_, _) => FailDecision ? throw new InvalidOperationException("Test decider failure") : Choice).Proxy;
             Manager = new BabelfinMediaSourceManager(inner, decider, Stats, NullLogger.Instance);
             var users = CallProxy.Create<IUserManager>((method, _) => method.Name == nameof(IUserManager.GetUserById) ? User : null).Proxy;
             var library = CallProxy.Create<ILibraryManager>((method, _) => method.Name == nameof(ILibraryManager.GetItemById) ? Item : null).Proxy;
@@ -446,6 +707,7 @@ public sealed class PlaybackResponseSafetyTests : IDisposable
             var compatibility = CallProxy.Create<ICompatibilityWriter>();
             Compatibility = compatibility.Recorder;
             _newFilter = () => new PlaybackInfoFilter(users, library, Manager, Stats, Registry, recorder, sessions, activity, compatibility.Proxy, NullLogger<PlaybackInfoFilter>.Instance);
+            _monitor = new PlaybackMonitor(sessions, Registry, recorder, Manager, users, library, activity, NullLogger<PlaybackMonitor>.Instance, Stats);
         }
 
         internal void SetTime(DateTime time) => _now = time;
@@ -458,7 +720,26 @@ public sealed class PlaybackResponseSafetyTests : IDisposable
             _now = T0;
         }
 
-        internal async Task<ActionExecutingContext> Request(string client, int? audio, string outcome = "success-not-started")
+        internal void Report(int? audio, int? subtitle)
+        {
+            var session = new SessionInfo(null!, NullLogger.Instance)
+            {
+                Id = "session", DeviceId = "device", Client = "Jellyfin Web", UserId = User.Id,
+                PlayState = new PlayerStateInfo { AudioStreamIndex = audio, SubtitleStreamIndex = subtitle, MediaSourceId = "source" },
+            };
+            typeof(PlaybackMonitor).GetMethod("HandleReport", BindingFlags.Instance | BindingFlags.NonPublic)!
+                .Invoke(_monitor, new object?[] { new PlaybackProgressEventArgs { Session = session, Item = Item, MediaSourceId = "source" } });
+        }
+
+        internal void StopOtherItem(DateTime time) => Registry.Update("session", play =>
+        {
+            play.UserId = User.Id;
+            play.Playing = false;
+            play.LastStoppedItemId = Guid.NewGuid();
+            play.LastStoppedAt = time;
+        });
+
+        internal async Task<ActionExecutingContext> Request(string client, int? audio, string outcome = "success-not-started", int? subtitle = null)
         {
             var http = new DefaultHttpContext
             {
@@ -472,6 +753,7 @@ public sealed class PlaybackResponseSafetyTests : IDisposable
             var action = new ActionContext(http, new RouteData(), new ControllerActionDescriptor { ControllerName = "MediaInfo", ActionName = "GetPostedPlaybackInfo" }, new ModelStateDictionary());
             var args = new Dictionary<string, object?> { ["itemId"] = Item.Id };
             if (audio.HasValue) args["audioStreamIndex"] = audio.Value;
+            if (subtitle.HasValue) args["subtitleStreamIndex"] = subtitle.Value;
             var context = new ActionExecutingContext(action, new List<IFilterMetadata>(), args, new object());
             await _newFilter().OnActionExecutionAsync(context, () => outcome switch
             {

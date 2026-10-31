@@ -39,7 +39,8 @@ def run_playback_checks(api, check, viewer, ids, anime_library_id):
         ms2 = item2["MediaSources"][0]
         check(status == 204 and status2 == 200 and f"{ms2.get('DefaultAudioStreamIndex')}/{ms2.get('DefaultSubtitleStreamIndex')}" == "2/4", f"DELETE the remembered change (manual=true): {status}; served again {ms2.get('DefaultAudioStreamIndex')}/{ms2.get('DefaultSubtitleStreamIndex')}")
 
-        # A play reported through Jellyfin's session endpoints: a subtitle change 6 s after start is remembered as "subtitles off".
+        # A play reported through Jellyfin's session endpoints: a subtitle change 6 s after start is remembered as "subtitles off"
+        # once a report at least 10 s later (Babelfin's settle period) still shows it.
         play_session = "rig-play-1"
         start = {"ItemId": dualAudio, "MediaSourceId": ms["Id"], "AudioStreamIndex": 2, "SubtitleStreamIndex": 4, "PlaySessionId": play_session, "PositionTicks": 0, "CanSeek": True, "IsPaused": False, "PlayMethod": "DirectPlay"}
         status, _, _ = viewer.post("/Sessions/Playing", start)
@@ -50,6 +51,14 @@ def run_playback_checks(api, check, viewer, ids, anime_library_id):
         changed = dict(start, PositionTicks=80_000_000, SubtitleStreamIndex=-1, EventName="TimeUpdate")
         status, _, _ = viewer.post("/Sessions/Playing/Progress", changed)
         time.sleep(1.5)
+        status, held, _ = viewer.get("/Babelfin/Me/Settings")
+        held_manual = [o for o in (held or {}).get("Settings", {}).get("Overrides", []) if o.get("Manual")]
+        check(status == 200 and not held_manual,
+              f"an in-play subtitle change is not remembered before it has stayed selected for 10 s ({[o.get('Manual') for o in held_manual]})")
+        time.sleep(9.5)
+        confirmed = dict(changed, PositionTicks=190_000_000)
+        viewer.post("/Sessions/Playing/Progress", confirmed)
+        time.sleep(1.5)
         status, me2, _ = viewer.get("/Babelfin/Me/Settings")
         manual2 = [o for o in (me2 or {}).get("Settings", {}).get("Overrides", []) if o.get("Manual")]
         check(status == 200 and any(o.get("Scope") == "Series" and o["Manual"].get("SubtitlesOff") is True for o in manual2),
@@ -59,7 +68,7 @@ def run_playback_checks(api, check, viewer, ids, anime_library_id):
         check(status == 200 and any(e.get("ItemId") == dualAudio and (e.get("Details") or {}).get("Client") == "BabelfinRig"
                                     and (e.get("Details") or {}).get("SubtitleIndex") == "-1" for e in new_events),
               f"Admin/Activity records the generic app's in-play memory as override-created ({len(new_events)} new events)")
-        viewer.post("/Sessions/Playing/Stopped", {"ItemId": dualAudio, "MediaSourceId": ms["Id"], "PlaySessionId": play_session, "PositionTicks": 90_000_000})
+        viewer.post("/Sessions/Playing/Stopped", {"ItemId": dualAudio, "MediaSourceId": ms["Id"], "PlaySessionId": play_session, "PositionTicks": 200_000_000})
         status3, item3, _ = viewer.get(f"/Users/{viewer.user_id}/Items/{dualAudio}")
         ms3 = item3["MediaSources"][0]
         check(ms3.get("DefaultSubtitleStreamIndex") in (-1, None), f"the remembered 'off' applies to the next decision for the show ({ms3.get('DefaultAudioStreamIndex')}/{ms3.get('DefaultSubtitleStreamIndex')})")

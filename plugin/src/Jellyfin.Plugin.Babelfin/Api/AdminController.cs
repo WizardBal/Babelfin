@@ -63,7 +63,7 @@ namespace Jellyfin.Plugin.Babelfin.Api;
 /// <item><c>POST Admin/ResetAll</c> first writes the <c>GET Admin/Export</c> document to <c>{DataPath}/babelfin/backups/babelfin-settings-before-reset-{UTC
 /// yyyyMMdd-HHmmss}.json</c> (never over an existing file: <c>-2</c>, <c>-3</c>… are added); when that fails it answers 500 and changes nothing. Each person
 /// whose Jellyfin user still exists then gets what a new person gets (their locks go too); the record of Jellyfin changes is kept and "handle next-episode
-/// tracks" is off, so the remember flags Babelfin turned off are put back. Documents of users who no longer exist are left alone (the backup holds them),
+/// tracks" is on, its default, so the remember flags stay off (or are turned off when they were on). Documents of users who no longer exist are left alone (the backup holds them),
 /// and one person's failure is logged without stopping the others. Last, the admin settings become the shipped defaults, so turning compatibility mode off
 /// puts back the remembered selections it wrote.</item>
 /// </list>
@@ -936,7 +936,6 @@ public class AdminController : ControllerBase
                     before = current;
                     fresh.StorageEpoch = current.StorageEpoch;
                     fresh.JellyfinChanges = current.JellyfinChanges?.Clone();
-                    fresh.HandleNextEpisode = false;
                     return fresh;
                 }))
                 {

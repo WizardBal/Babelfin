@@ -143,7 +143,7 @@ const onPage = (profile, stored, field) => {
     if (field === 'Sdh' && always === true) { return 'Prefer'; }
     return s[field] !== undefined && s[field] !== null ? String(s[field]) : shown(profile, field);
 };
-// The fields "Restore defaults" clears, HandleNextEpisode aside.
+// The fields "Restore defaults" clears, HandleNextEpisode (back on) aside.
 const RESTORED = ['IfNothingMatches', 'Format', 'Embedded', 'Sdh', 'PrefersSdh', 'UnlabelledAudio', 'UnlabelledAudioLanguage', 'UsesAudioDescription', 'AvoidCommentary', 'UnknownAudioCountsAsUnderstood', 'Memory'];
 /** A copy without null members (what a server that leaves nulls out of its JSON sends). */
 function dropNulls(value) {
@@ -1511,23 +1511,40 @@ async function confirmDialog(env, ok) {
             eq([group(d, id).button.getAttribute('aria-expanded'), group(d, id).body.hidden, env.store.get('babelfin-app-group-' + id)], ['false', true, '0'], id + ': closes and remembers');
         }
         check(!!group(d, 'reads').body.querySelector('.bfui-list, .bfui-ordered') && /In order of preference/.test(group(d, 'reads').body.textContent), 'Languages for subtitles: the ordered list and its help line');
-        // Track changes: a help line saying what a remembered change does; "Replace Jellyfin's remembered tracks" only for a person who has it on.
+        // Track changes: a help line saying what a remembered change does, and the next-episode switch for everyone, on unless stored off.
         check(/instead of your library choice/.test(group(d, 'trackChanges').body.querySelector('.bf-group-help').textContent), 'Track changes: the help line explains it outranks the library choice');
-        check(!/Replace Jellyfin's remembered tracks/.test(group(d, 'trackChanges').body.textContent), 'Track changes: no "Replace Jellyfin\'s remembered tracks" when it is off');
+        const nextEpisode = (doc) => group(doc, 'trackChanges').body.querySelectorAll('.bfui-switch').find((s) => s.querySelector('.bfui-switch-label') && s.querySelector('.bfui-switch-label').textContent === en['advanced.nextEpisode']);
+        check(!!nextEpisode(d) && !nextEpisode(d).querySelector('input[type=checkbox]').checked, 'Track changes: the switch is shown off for a person who turned it off');
+        {
+            const off = await makeEnv(sample());
+            const input = nextEpisode(off.document) ? nextEpisode(off.document).querySelector('input[type=checkbox]') : null;
+            if (input) {
+                input.click();
+                await clickSave(off);
+                eq(lastPut(off).body.HandleNextEpisode, true, 'Track changes: switching it on saves true');
+            }
+        }
+        {
+            const unset = sample();
+            delete unset.Settings.HandleNextEpisode;
+            const sw = nextEpisode((await makeEnv(unset)).document);
+            check(!!sw && sw.querySelector('input[type=checkbox]').checked, 'Track changes: the switch shows on when the document has no value (the default)');
+        }
         {
             const on = await makeEnv(sample({ settings: { HandleNextEpisode: true } }));
-            const sw = group(on.document, 'trackChanges').body.querySelectorAll('.bfui-switch').find((s) => /Replace Jellyfin's remembered tracks/.test(s.textContent));
+            const sw = nextEpisode(on.document);
             check(!!sw, 'Track changes: shown when it is on');
             const input = sw ? sw.querySelector('input[type=checkbox]') : null;
             check(!!input && input.checked, 'Track changes: the switch shows on');
             const swTip = sw ? sw.querySelector('.bfui-tip') : null;
             eq(swTip ? [sw.querySelectorAll('.bfui-info').length, swTip.textContent, sw.querySelector('.bfui-info').getAttribute('aria-label'), (input.getAttribute('aria-describedby') || '').split(' ').indexOf(swTip.id) >= 0] : null,
-                [1, en['advanced.nextEpisode.help'], "More about Replace Jellyfin's remembered tracks", true], 'Track changes: the switch explains itself with an infoTip');
+                [1, en['advanced.nextEpisode.help'], 'More about ' + en['advanced.nextEpisode'], true], 'Track changes: the switch explains itself with an infoTip');
             if (input) {
                 input.click();
                 await clickSave(on);
                 eq(lastPut(on).body.HandleNextEpisode, false, 'Track changes: switching it off saves false');
-                check(!/Replace Jellyfin's remembered tracks/.test(group(on.document, 'trackChanges').body.textContent), 'Track changes: gone once saved off');
+                const after = nextEpisode(on.document);
+                check(!!after && !after.querySelector('input[type=checkbox]').checked, 'Track changes: still shown, off, once saved off');
             }
         }
         check(/Old Film/.test(group(d, 'burnedIn').body.textContent), 'Burned-in subtitles lists the flag');
@@ -1580,7 +1597,6 @@ async function confirmDialog(env, ok) {
     {
         const kept = {
             UseEverydayEverywhere: true,
-            HandleNextEpisode: false,
             SmartRules: [{ Id: 'r1', Name: 'Kids', Enabled: true, Match: 'Any', Conditions: [{ Kind: 'Genre', Values: ['Kids'], Negate: true, IsRegex: false }], Settings: { WhenAudioUnderstood: 'Off', TieBreaks: ['Lossless'] } }],
             CollectionOrder: ['eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee'],
             Locks: { Sdh: 'Avoid' },
@@ -1680,9 +1696,9 @@ async function confirmDialog(env, ok) {
             eq([modeControl(d).mode, rowNames(d)], ['each', ['Anime', 'Movies']], lang + ': the mode switches');
             eq(all().filter((s) => rawKey.test(s)), [], lang + ': no untranslated key shows (per library)');
             eq(cellSelect(d, N(ANIME), 'audio').getAttribute('aria-label'), table['ui.table.audioFor'].split('{name}').join('Anime'), lang + ': aria-label from the file');
-            // Every option and the switch have an infoTip with words, not a key; the My languages line has none.
+            // Every option and both switches have an infoTip with words, not a key; the My languages line has none.
             const tips = d.querySelectorAll('.bfui-tip').filter((tip) => !tip.closest('.bfui-table-cell, section.bfui-genres'));
-            eq(tips.length, 10, lang + ': 10 infoTips (9 options, the on/off switch; none on My languages)');
+            eq(tips.length, 11, lang + ': 11 infoTips (9 options, the on/off switch, the next-episode switch; none on My languages)');
             eq(d.querySelectorAll('.bf-languages .bfui-info').length, 0, lang + ': no infoTip on the My languages line');
             eq(tips.filter((x) => !x.textContent.trim() || rawKey.test(x.textContent)).map((x) => x.textContent), [], lang + ': every tip has words, not a key');
             eq(d.querySelectorAll('.bfui-info').filter((x) => !x.getAttribute('aria-label') || rawKey.test(x.getAttribute('aria-label'))).length, 0, lang + ': every "i" button has a name');
@@ -1850,7 +1866,7 @@ async function confirmDialog(env, ok) {
         };
         const loaded = sample({
             settings: {
-                Enabled: false, HandleNextEpisode: true, PerLibrary: true, Everyday: everyday,
+                Enabled: false, HandleNextEpisode: false, PerLibrary: true, Everyday: everyday,
                 Libraries: [{ LibraryId: N(ANIME), Name: 'Anime', Settings: { WhenAudioUnderstood: 'Full', WhenAudioNotUnderstood: 'Full', SubtitleLanguages: ['en'], Memory: 'Season', Format: 'TextOnly' } }],
                 Locks: { Sdh: 'Avoid' }
             }
@@ -1872,7 +1888,7 @@ async function confirmDialog(env, ok) {
         const restoredPaths = RESTORED.map((f) => 'Everyday.' + f).concat(['HandleNextEpisode']).sort();
         eq(settingsDiff(loaded.Settings, env.doc(), '').sort(), restoredPaths, 'exactly the the settings contract fields change');
         RESTORED.forEach((f) => eq(nz(env.doc().Everyday[f]), null, f + ' cleared'));
-        eq(env.doc().HandleNextEpisode, false, 'Replace Jellyfin\'s remembered tracks off');
+        eq(env.doc().HandleNextEpisode, true, 'the next-episode switch back on');
         eq(dropNulls([env.doc().Everyday.Understood, env.doc().Everyday.Reads, env.doc().Enabled, env.doc().PerLibrary, env.doc().Locks, env.doc().Libraries, env.doc().Overrides, env.doc().BurnedIn, env.doc().SmartRules]),
             dropNulls([everyday.Understood, everyday.Reads, false, true, { Sdh: 'Avoid' }, loaded.Settings.Libraries, loaded.Settings.Overrides, loaded.Settings.BurnedIn, loaded.Settings.SmartRules]),
             'My languages, Languages for subtitles, the on/off switch, the mode, locks, library entries (their own options too), shows and movies, flags and rules untouched');
@@ -1884,7 +1900,7 @@ async function confirmDialog(env, ok) {
         eq([advSelect(d, 'Sdh').value, advSelect(d, 'Sdh').disabled], ['Avoid', true], 'the locked field still shows the admin\'s value');
         eq(d.querySelector('.bf-advanced-top input[type=checkbox]').checked, false, 'Let Babelfin choose your audio and subtitles is still off');
         const switches = group(d, 'trackChanges').body.querySelectorAll('input[type=checkbox]');
-        eq(switches.map((i) => i.checked), [false], 'Replace Jellyfin\'s remembered tracks shows off');
+        eq(switches.map((i) => i.checked), [true], 'the next-episode switch shows on');
         eq([cellSelect(d, N(ANIME), 'subtitles').value, modeControl(d).mode], ['lang:en', 'each'], 'the table is untouched');
         await clickSave(env);
         eq(putCount(env), 1, 'Save sends it');
@@ -1900,7 +1916,7 @@ async function confirmDialog(env, ok) {
         eq(settingsDiff(loaded.Settings, env2.doc(), ''), [], 'Discard after Restore defaults puts every field back');
         eq(advSelect(env2.document, 'Memory').value, 'TitleOnly', 'and the dropdowns show the stored values again');
         // Nothing to restore: no change.
-        const env3 = await makeEnv(sample({ settings: quiet() }));
+        const env3 = await makeEnv(sample({ settings: quiet({ HandleNextEpisode: true }) }));
         env3.document.getElementById('bf-restore-defaults').click();
         await confirmDialog(env3, true);
         check(saveBarHidden(env3), 'nothing stored: Restore defaults leaves nothing to save');
@@ -2104,11 +2120,17 @@ async function confirmDialog(env, ok) {
         eq(line.querySelector('.bf-languages-summary').textContent, 'My languages: English', 'the summary keeps its text');
         eq(line.querySelector('.bf-languages-summary').nextSibling, null, 'and nothing follows it in its line');
         ids.push(tp.tip.id);
+        // The next-episode switch in Track changes.
+        const next = group(d, 'trackChanges').body.querySelector('.bfui-switch');
+        const np = tipParts(next);
+        eq([next.querySelectorAll('.bfui-info').length, np.button.getAttribute('aria-label'), np.tip.getAttribute('role'), np.tip.hidden, np.tip.textContent],
+            [1, 'More about ' + en['advanced.nextEpisode'], 'tooltip', true, en['advanced.nextEpisode.help']], 'the next-episode switch: one infoTip (advanced.nextEpisode.help)');
+        ids.push(np.tip.id);
         eq(new Set(ids).size, ids.length, 'every tip has its own id');
         check(ids.every((id) => d.querySelectorAll('[id=' + id + ']').length === 1), 'and each id is on one element only');
         // Every tip: the mouse and keyboard focus show it, leaving hides it.
-        const all = Object.keys(ADVANCED_FIELDS).map((f) => [f, tipParts(advSelect(d, f).closest('.bfui-row'))]).concat([['the top switch', tp]]);
-        eq(d.querySelectorAll('.bfui-info').filter(button => !button.closest('.bfui-choice-line')).length, all.length, 'outside the new audio-choice tips, the page has exactly ' + all.length + ' "i" buttons: 9 options and the switch');
+        const all = Object.keys(ADVANCED_FIELDS).map((f) => [f, tipParts(advSelect(d, f).closest('.bfui-row'))]).concat([['the top switch', tp], ['the next-episode switch', np]]);
+        eq(d.querySelectorAll('.bfui-info').filter(button => !button.closest('.bfui-choice-line')).length, all.length, 'outside the new audio-choice tips, the page has exactly ' + all.length + ' "i" buttons: 9 options and the two switches');
         eq(d.querySelectorAll('.bfui-choice-line .bfui-info').length, 0, 'default library and genre audio cells have no attached option tip');
         for (const [name, p] of all) {
             fire(p.button, 'mouseenter');

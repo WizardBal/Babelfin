@@ -451,7 +451,7 @@ public sealed class CompatTests : IDisposable
     }
 
     [Fact]
-    public async Task RestoreAll_RestoresEveryone_AndTurnsTheSwitchOff()
+    public async Task RestoreAll_RestoresEveryone_AndLeavesTheSwitchAsStored()
     {
         var host = new FlagsHost();
         var a = host.Add(audio: true, subtitles: true);
@@ -465,10 +465,32 @@ public sealed class CompatTests : IDisposable
         Assert.True(a.RememberAudioSelections && a.RememberSubtitleSelections);
         Assert.False(b.RememberAudioSelections);
         Assert.True(b.RememberSubtitleSelections);
-        Assert.False(host.Store.TryGet(a.Id)!.HandleNextEpisode);
+        Assert.True(host.Store.TryGet(a.Id)!.HandleNextEpisode);
+        Assert.Null(host.Store.TryGet(a.Id)!.JellyfinChanges);
+        Assert.True(host.Store.TryGet(b.Id)!.HandleNextEpisode);
         Assert.Null(host.Store.TryGet(b.Id)!.JellyfinChanges);
+        Assert.False(host.Store.TryGet(untouched.Id)!.HandleNextEpisode);
         Assert.True(untouched.RememberAudioSelections);
         Assert.DoesNotContain(host.Updates, u => u.UserId == untouched.Id);
+    }
+
+    [Fact]
+    public async Task ARestoreAllThenAFreshServiceTurnsTheFlagsOffAgain()
+    {
+        var host = new FlagsHost();
+        var user = host.Add(audio: true, subtitles: false);
+        await host.Flags.ApplyAsync(user, CancellationToken.None);
+        await host.Flags.RestoreAllAsync(CancellationToken.None);
+        Assert.True(user.RememberAudioSelections);
+        Assert.True(host.Store.TryGet(user.Id)!.HandleNextEpisode);
+
+        var reinstalled = new RememberFlags(host.UserManager, host.Store, host.Activity, NullLogger<RememberFlags>.Instance);
+        await reinstalled.ApplyAsync(user, CancellationToken.None);
+
+        Assert.False(user.RememberAudioSelections);
+        var changes = host.Store.TryGet(user.Id)!.JellyfinChanges!;
+        Assert.True(changes.RememberAudioSelections);
+        Assert.False(changes.RememberSubtitleSelections);
     }
 
     [Fact]

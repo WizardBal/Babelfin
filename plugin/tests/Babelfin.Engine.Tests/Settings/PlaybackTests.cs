@@ -20,7 +20,7 @@ using Xunit;
 
 namespace Babelfin.Engine.Tests.Settings;
 
-/// <summary>Playback behavior: the play registry, the track comparer, the change recorder, the PlaybackInfo table and the monitor's report logic.</summary>
+/// <summary>Playback behavior: the play registry, the change recorder, the PlaybackInfo table and the monitor's report logic.</summary>
 public class PlaybackTests
 {
     private static readonly DateTime T0 = new(2026, 10, 19, 20, 0, 0, DateTimeKind.Utc);
@@ -94,42 +94,6 @@ public class PlaybackTests
         Assert.True(registry.Remove("s1"));
         Assert.Null(registry.UpdateExisting("s1", r => r.ExpectedAudio = 3));
 
-    }
-
-    // ── Track comparer ──
-
-    [Fact]
-    public void Comparer_SameLanguageDifferentKind_Disagrees()
-    {
-        var source = Source();
-        Assert.True(TrackComparer.Disagree(source, 1, 4, 3, 4));
-        Assert.True(TrackComparer.Disagree(source, 1, 4, 1, 5));
-    }
-
-    [Fact]
-    public void Comparer_GenericAndExactTagsOfOneBase_Agree()
-    {
-        var source = Source();
-        Assert.False(TrackComparer.Disagree(source, 1, 4, 1, 6));
-        Assert.False(TrackComparer.Disagree(source, 1, 4, 1, 4));
-    }
-
-    [Fact]
-    public void Comparer_OffAgainstATrack_Disagrees_OffAgainstOff_Agrees()
-    {
-        var source = Source();
-        Assert.True(TrackComparer.Disagree(source, 1, -1, 1, 4));
-        Assert.True(TrackComparer.Disagree(source, 1, 4, 1, null));
-        Assert.False(TrackComparer.Disagree(source, 1, null, 1, -1));
-    }
-
-    [Fact]
-    public void Comparer_OtherLanguage_Disagrees_UnknownAudio_DoesNot()
-    {
-        var source = Source();
-        Assert.True(TrackComparer.Disagree(source, 1, 4, 2, 4));
-        Assert.False(TrackComparer.Disagree(source, null, 4, 2, 4));
-        Assert.True(TrackComparer.Disagree(source, 1, 4, 42, 4));
     }
 
     // ── Track change recorder ──
@@ -354,24 +318,24 @@ public class PlaybackTests
     // ── The PlaybackInfo decision table ──
 
     [Theory]
-    [InlineData(false, false, false, false, false, AppModeKind.ReplaceUnlessManual, false, false, PlaybackInfoOutcome.Trust)]
-    [InlineData(true, true, true, false, true, AppModeKind.ReplaceUnlessManual, false, true, PlaybackInfoOutcome.Manual)]
-    [InlineData(true, true, false, true, true, AppModeKind.ReplaceUnlessManual, true, true, PlaybackInfoOutcome.Trust)]
-    [InlineData(true, false, false, false, false, AppModeKind.ReplaceUnlessManual, false, false, PlaybackInfoOutcome.Trust)]
-    [InlineData(true, false, false, true, false, AppModeKind.Trust, false, false, PlaybackInfoOutcome.Trust)]
-    [InlineData(true, false, false, true, true, AppModeKind.Trust, false, true, PlaybackInfoOutcome.Manual)]
-    [InlineData(true, false, false, true, true, AppModeKind.ReplaceUnlessManual, false, true, PlaybackInfoOutcome.Manual)]
-    [InlineData(true, false, false, false, true, AppModeKind.ReplaceUnlessManual, false, false, PlaybackInfoOutcome.Replace)]
-    [InlineData(true, false, false, false, true, AppModeKind.Trust, true, true, PlaybackInfoOutcome.Trust)]
-    [InlineData(true, false, false, false, true, AppModeKind.ReplaceOnAutoplay, false, true, PlaybackInfoOutcome.Trust)]
-    [InlineData(true, false, false, false, true, AppModeKind.ReplaceOnAutoplay, true, true, PlaybackInfoOutcome.Replace)]
-    [InlineData(true, false, false, false, true, AppModeKind.ReplaceOnAutoplay, true, false, PlaybackInfoOutcome.Trust)]
-    [InlineData(true, false, false, true, true, AppModeKind.ReplaceOnAutoplay, true, true, PlaybackInfoOutcome.Replace)]
-    [InlineData(true, false, false, true, true, AppModeKind.ReplaceOnAutoplay, false, true, PlaybackInfoOutcome.Manual)]
-    [InlineData(true, false, false, false, true, AppModeKind.ReplaceUnlessManual, true, false, PlaybackInfoOutcome.Replace)]
-    public void Filter_DecisionTable(bool explicitIndices, bool repeat, bool differsExpected, bool differsServed, bool differsChoice, AppModeKind mode, bool autoplay, bool disagree, PlaybackInfoOutcome expected)
+    [InlineData(false, false, false, false, false, AppModeKind.ReplaceUnlessManual, false, PlaybackInfoOutcome.Trust)]
+    [InlineData(true, true, true, false, true, AppModeKind.ReplaceUnlessManual, false, PlaybackInfoOutcome.Manual)]
+    [InlineData(true, true, false, true, true, AppModeKind.ReplaceUnlessManual, true, PlaybackInfoOutcome.Trust)]
+    [InlineData(true, false, false, false, false, AppModeKind.ReplaceUnlessManual, false, PlaybackInfoOutcome.Trust)]
+    [InlineData(true, false, false, true, false, AppModeKind.Trust, false, PlaybackInfoOutcome.Trust)]
+    [InlineData(true, false, false, true, true, AppModeKind.Trust, false, PlaybackInfoOutcome.Manual)]
+    [InlineData(true, false, false, true, true, AppModeKind.ReplaceUnlessManual, false, PlaybackInfoOutcome.Manual)]
+    [InlineData(true, false, false, false, true, AppModeKind.ReplaceUnlessManual, false, PlaybackInfoOutcome.Replace)]
+    [InlineData(true, false, false, false, true, AppModeKind.Trust, true, PlaybackInfoOutcome.Trust)]
+    [InlineData(true, false, false, false, true, AppModeKind.ReplaceOnAutoplay, false, PlaybackInfoOutcome.Trust)]
+    [InlineData(true, false, false, false, true, AppModeKind.ReplaceOnAutoplay, true, PlaybackInfoOutcome.Replace)]
+    [InlineData(true, false, false, false, false, AppModeKind.ReplaceOnAutoplay, true, PlaybackInfoOutcome.Trust)]
+    [InlineData(true, false, false, true, true, AppModeKind.ReplaceOnAutoplay, true, PlaybackInfoOutcome.Replace)]
+    [InlineData(true, false, false, true, true, AppModeKind.ReplaceOnAutoplay, false, PlaybackInfoOutcome.Manual)]
+    [InlineData(true, false, false, false, true, AppModeKind.ReplaceUnlessManual, true, PlaybackInfoOutcome.Replace)]
+    public void Filter_DecisionTable(bool explicitIndices, bool repeat, bool differsExpected, bool differsServed, bool differsChoice, AppModeKind mode, bool autoplay, PlaybackInfoOutcome expected)
     {
-        var facts = new PlaybackInfoFacts(explicitIndices, repeat, differsExpected, differsServed, differsChoice, mode, autoplay, disagree);
+        var facts = new PlaybackInfoFacts(explicitIndices, repeat, differsExpected, differsServed, differsChoice, mode, autoplay);
         Assert.Equal(expected, PlaybackInfoFilter.Decide(facts));
     }
 
@@ -456,6 +420,51 @@ public class PlaybackTests
         dry.StartedAt = T0;
         PlaybackMonitor.Evaluate(dry, 2, 4, T0, CorrectAfterStartMode.Auto, 5, true, null);
         Assert.False(PlaybackMonitor.Evaluate(dry, 1, 4, T0.AddSeconds(30), CorrectAfterStartMode.Auto, 5, true, null).Manual);
+    }
+
+    [Fact]
+    public void Monitor_AChangeSettlesOnceOnAReportOneSettlePeriodLater()
+    {
+        var r = Expected(2, 4);
+        r.StartedAt = T0;
+        PlaybackMonitor.Evaluate(r, 2, 4, T0, CorrectAfterStartMode.Auto, 5, false, null);
+        var changedAt = T0.AddSeconds(30);
+        var change = PlaybackMonitor.Evaluate(r, 2, -1, changedAt, CorrectAfterStartMode.Auto, 5, false, null);
+        Assert.True(change.Manual);
+        Assert.True(change.Held);
+        Assert.Null(change.Settled);
+        Assert.Equal(-1, r.ExpectedSubtitle);
+
+        Assert.Null(PlaybackMonitor.Evaluate(r, 2, -1, changedAt + PlaybackMonitor.SettlePeriod - TimeSpan.FromTicks(1), CorrectAfterStartMode.Auto, 5, false, null).Settled);
+        Assert.Null(PlaybackMonitor.Evaluate(r, 2, null, changedAt + PlaybackMonitor.SettlePeriod, CorrectAfterStartMode.Auto, 5, false, null).Settled);
+        var settled = PlaybackMonitor.Evaluate(r, 2, -1, changedAt + PlaybackMonitor.SettlePeriod, CorrectAfterStartMode.Auto, 5, false, null).Settled;
+        Assert.NotNull(settled);
+        Assert.Null(settled!.Audio);
+        Assert.Equal(-1, settled.Subtitle!.Index);
+        Assert.Equal(4, settled.Subtitle.Previous);
+        Assert.Equal(changedAt, settled.Subtitle.Since);
+        Assert.Null(PlaybackMonitor.Evaluate(r, 2, -1, changedAt.AddMinutes(5), CorrectAfterStartMode.Auto, 5, false, null).Settled);
+    }
+
+    [Fact]
+    public void Monitor_AChangeBackWithinTheSettlePeriodDropsItAndAnotherTrackKeepsTheFirstStart()
+    {
+        var r = Expected(2, 4);
+        r.StartedAt = T0;
+        PlaybackMonitor.Evaluate(r, 2, 4, T0, CorrectAfterStartMode.Auto, 5, false, null);
+        PlaybackMonitor.Evaluate(r, 1, 4, T0.AddSeconds(30), CorrectAfterStartMode.Auto, 5, false, null);
+        var back = PlaybackMonitor.Evaluate(r, 2, 4, T0.AddSeconds(35), CorrectAfterStartMode.Auto, 5, false, null);
+        Assert.True(back.Manual);
+        Assert.False(back.Held);
+        Assert.True(back.Dropped);
+        Assert.Null(PlaybackMonitor.Evaluate(r, 2, 4, T0.AddMinutes(5), CorrectAfterStartMode.Auto, 5, false, null).Settled);
+
+        PlaybackMonitor.Evaluate(r, 1, 4, T0.AddMinutes(6), CorrectAfterStartMode.Auto, 5, false, null);
+        PlaybackMonitor.Evaluate(r, 3, 4, T0.AddMinutes(6).AddSeconds(5), CorrectAfterStartMode.Auto, 5, false, null);
+        var settled = PlaybackMonitor.Evaluate(r, 3, 4, T0.AddMinutes(6).AddSeconds(15), CorrectAfterStartMode.Auto, 5, false, null).Settled;
+        Assert.Equal(3, settled!.Audio!.Index);
+        Assert.Equal(2, settled.Audio.Previous);
+        Assert.Null(settled.Subtitle);
     }
 
     // ── Helpers ──

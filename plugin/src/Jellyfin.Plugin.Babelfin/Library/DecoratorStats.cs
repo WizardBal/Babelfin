@@ -32,7 +32,8 @@ public enum DecisionOutcome
 /// <param name="JellyfinSubtitleIndex">Jellyfin's own subtitle index.</param>
 /// <param name="Decision">Babelfin's decision, or null when it had nothing to say.</param>
 /// <param name="Outcome">What happened to it.</param>
-public sealed record DecisionRecord(DateTime At, int? JellyfinAudioIndex, int? JellyfinSubtitleIndex, TrackDecision? Decision, DecisionOutcome Outcome);
+/// <param name="PreviousServedAt">For a served record, when the same person, item, source, device and app were last served before this response within the 30-minute served window; otherwise null.</param>
+public sealed record DecisionRecord(DateTime At, int? JellyfinAudioIndex, int? JellyfinSubtitleIndex, TrackDecision? Decision, DecisionOutcome Outcome, DateTime? PreviousServedAt = null);
 
 /// <summary>
 /// Counters and recent decisions of the <see cref="BabelfinMediaSourceManager"/>. Thread-safe.
@@ -200,8 +201,10 @@ public sealed class DecoratorStats
                         }
                     }
 
+                    DateTime? previous = _served.TryGetValue(key, out var earlier) && earlier.At > now.AddMinutes(-30) ? earlier.At : null;
+
                     // These are the defaults actually returned, after the controller's changes as well as ours.
-                    _served[key] = new DecisionRecord(now, source.DefaultAudioStreamIndex, source.DefaultSubtitleStreamIndex, null, DecisionOutcome.PassedThrough);
+                    _served[key] = new DecisionRecord(now, source.DefaultAudioStreamIndex, source.DefaultSubtitleStreamIndex, null, DecisionOutcome.PassedThrough, previous);
                 }
             }
 

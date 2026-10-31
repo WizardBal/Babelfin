@@ -86,8 +86,8 @@ static int Run(string[] args)
 
     // A schema-version 1 settings file with legacy probe fields, plus an admin everyday default
     // (audio: Japanese; subtitles: full English when the audio isn't understood). Loading it must upgrade to the current version,
-    // retire the probe fields, clear the server-wide track defaults (version 4: neutral until someone chooses) and copy the old
-    // file to babelfin/backups first.
+    // retire the probe fields, clear the server-wide track defaults (version 4: neutral until someone chooses), keep the shipped
+    // "Jellyfin for Android" app row (version 9) and copy the old file to babelfin/backups first.
     Directory.CreateDirectory(Path.Combine(tmp, "cfg"));
     File.WriteAllText(Path.Combine(tmp, "cfg", "Jellyfin.Plugin.Babelfin.xml"), """
         <?xml version="1.0" encoding="utf-8"?>
@@ -116,7 +116,7 @@ static int Run(string[] args)
     var currentVersion = cfg.GetType().GetField("CurrentVersion", BindingFlags.Public | BindingFlags.Static)?.GetRawConstantValue()
         ?? throw new InvalidOperationException("PluginConfiguration.CurrentVersion not found");
     var versionTag = $"<ConfigVersion>{currentVersion}</ConfigVersion>";
-    if (!versionTag.Equals("<ConfigVersion>8</ConfigVersion>", StringComparison.Ordinal) || !savedXml.Contains(versionTag, StringComparison.Ordinal))
+    if (!versionTag.Equals("<ConfigVersion>9</ConfigVersion>", StringComparison.Ordinal) || !savedXml.Contains(versionTag, StringComparison.Ordinal))
     {
         throw new InvalidOperationException("settings were not upgraded and saved with " + versionTag + ":\n" + savedXml);
     }
@@ -124,6 +124,11 @@ static int Run(string[] args)
     if (savedXml.Contains("Probe", StringComparison.Ordinal))
     {
         throw new InvalidOperationException("the retired probe fields were written back:\n" + savedXml);
+    }
+
+    if (!savedXml.Contains("<Client>Jellyfin for Android</Client>", StringComparison.Ordinal))
+    {
+        throw new InvalidOperationException("the version 9 upgrade did not leave the shipped Jellyfin for Android app row:\n" + savedXml);
     }
 
     if (savedXml.Contains("<Language>jpn</Language>", StringComparison.Ordinal) || savedXml.Contains("LastUpgradeNote", StringComparison.Ordinal))
@@ -137,7 +142,7 @@ static int Run(string[] args)
         throw new InvalidOperationException("the previous settings file was not copied to babelfin/backups before the upgrade (" + backups.Length + " copies)");
     }
 
-    Console.WriteLine($"settings upgraded from version 1 and saved with {versionTag}; probe retired, server-wide track defaults cleared, the old file kept in {Path.GetFileName(backups[0])}, no upgrade note");
+    Console.WriteLine($"settings upgraded from version 1 and saved with {versionTag}; probe retired, server-wide track defaults cleared, the Jellyfin for Android app row present, the old file kept in {Path.GetFileName(backups[0])}, no upgrade note");
 
     // Now an admin default chosen after the upgrade (Japanese audio, full English when the audio isn't understood), set through
     // the plugin's own types so the decision below runs exactly as on the server.
@@ -182,7 +187,7 @@ static int Run(string[] args)
         }
 
         var personFile = Directory.GetFiles(Path.Combine(tmp, "babelfin", "users"), "*.json").SingleOrDefault();
-        if (personFile is null || !File.ReadAllText(personFile).Contains("\"schemaVersion\": 3", StringComparison.Ordinal))
+        if (personFile is null || !File.ReadAllText(personFile).Contains("\"schemaVersion\": 4", StringComparison.Ordinal))
         {
             throw new InvalidOperationException("the person's settings file was not seeded under babelfin/users");
         }

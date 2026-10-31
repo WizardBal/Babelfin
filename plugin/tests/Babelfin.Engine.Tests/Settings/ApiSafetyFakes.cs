@@ -59,7 +59,7 @@ internal sealed class ApiSafetyFlags : IRememberFlags
     }
 
     public void StopWrites() { }
-    public Task RestoreAllAsync(CancellationToken token, bool turnSwitchOff = true) => Task.CompletedTask;
+    public Task RestoreAllAsync(CancellationToken token) => Task.CompletedTask;
 }
 
 internal static class ApiSafetyHost

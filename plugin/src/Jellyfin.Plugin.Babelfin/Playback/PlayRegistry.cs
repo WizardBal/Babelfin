@@ -6,6 +6,26 @@ using Jellyfin.Plugin.Babelfin.Settings;
 namespace Jellyfin.Plugin.Babelfin.Playback;
 
 /// <summary>
+/// A track change made during play and not remembered yet: it is remembered once it has stayed selected for
+/// <see cref="PlaybackMonitor.SettlePeriod"/>, and dropped when another track is selected before then.
+/// </summary>
+/// <param name="Index">The track the change selected (subtitles: negative = off).</param>
+/// <param name="Previous">The track before the first of this stream's unsettled changes (subtitles: null = unknown, negative = off).
+/// A return to it drops the change.</param>
+/// <param name="Since">When <paramref name="Index"/> was selected (UTC).</param>
+/// <param name="Order">The order in which the change was observed; a newer remembered change is never overwritten by it.</param>
+public sealed record PendingTrackChange(int? Index, int? Previous, DateTime Since, ManualChangeOrder Order);
+
+/// <summary>The in-play track changes of one play that stayed selected for <see cref="PlaybackMonitor.SettlePeriod"/>: what is remembered.</summary>
+/// <param name="UserId">The person.</param>
+/// <param name="ItemId">The item played.</param>
+/// <param name="MediaSourceId">The media source the indices refer to.</param>
+/// <param name="Client">The app.</param>
+/// <param name="Audio">The settled audio change, or null.</param>
+/// <param name="Subtitle">The settled subtitle change, or null.</param>
+public sealed record SettledChange(Guid UserId, Guid? ItemId, string? MediaSourceId, string? Client, PendingTrackChange? Audio, PendingTrackChange? Subtitle);
+
+/// <summary>
 /// One play as the registry tracks it. A mutable record: the registry hands out copies, and changes go through
 /// <see cref="PlayRegistry.Update(string, Action{PlayRecord})"/> under its lock.
 /// </summary>
@@ -61,6 +81,11 @@ public sealed class PlayRecord
     internal DateTime? AudioCommandSentAt { get; set; }
 
     internal DateTime? SubtitleCommandSentAt { get; set; }
+
+    // In-play changes waiting to settle before they are remembered; the play's expectations already follow them.
+    internal PendingTrackChange? PendingAudio { get; set; }
+
+    internal PendingTrackChange? PendingSubtitle { get; set; }
 
     /// <summary>Gets or sets the Jellyfin session id, or null for an entry keyed by device, client and item (a PlaybackInfo before any session).</summary>
     public string? SessionId { get; set; }
@@ -187,6 +212,73 @@ public sealed class PlayRecord
             && now >= audioAt && now - audioAt <= TimeSpan.FromSeconds(10)
             && !(LastSubtitleChangedAt is { } subtitleAt && subtitleAt >= audioAt);
 
+    /// <summary>Holds an in-play audio change until it settles. A newer change replaces the held one and keeps its starting track;
+    /// a return to that track drops it.</summary>
+    /// <returns>True when a change is held; false when the change returned to the starting track.</returns>
+    internal bool HoldAudioChange(int? audio, int? previous, DateTime now, ManualChangeOrder order)
+    {
+        var from = PendingAudio is { } held ? held.Previous : previous;
+        PendingAudio = from.HasValue && audio == from ? null : new PendingTrackChange(audio, from, now, order);
+        return PendingAudio is not null;
+    }
+
+    /// <summary>Holds an in-play subtitle change until it settles, as <see cref="HoldAudioChange"/> does for audio (every negative index is "off").</summary>
+    /// <returns>True when a change is held; false when the change returned to the starting track.</returns>
+    internal bool HoldSubtitleChange(int? subtitle, int? previous, DateTime now, ManualChangeOrder order)
+    {
+        var from = PendingSubtitle is { } held ? held.Previous : previous;
+        PendingSubtitle = from.HasValue && Off(subtitle) == Off(from) ? null : new PendingTrackChange(subtitle, from, now, order);
+        return PendingSubtitle is not null;
+    }
+
+    /// <summary>
+    /// Takes the held changes that have settled: still the last reported track and selected for at least
+    /// <see cref="PlaybackMonitor.SettlePeriod"/>. A held change whose track is no longer the last reported one is dropped.
+    /// </summary>
+    /// <param name="now">The time of the report or of the play's end (UTC).</param>
+    /// <param name="audio">Whether a held audio change can settle now: a report named the audio track, or the play ended.</param>
+    /// <param name="subtitle">Whether a held subtitle change can settle now.</param>
+    /// <param name="dropped">Whether a held change was dropped.</param>
+    /// <returns>The settled changes, or null when none settled.</returns>
+    internal SettledChange? TakeSettled(DateTime now, bool audio, bool subtitle, out bool dropped)
+    {
+        dropped = false;
+        PendingTrackChange? settledAudio = null, settledSubtitle = null;
+        if (PendingAudio is { } heldAudio)
+        {
+            if (LastReportedAudio != heldAudio.Index)
+            {
+                PendingAudio = null;
+                dropped = true;
+            }
+            else if (audio && now - heldAudio.Since >= PlaybackMonitor.SettlePeriod)
+            {
+                settledAudio = heldAudio;
+                PendingAudio = null;
+            }
+        }
+
+        if (PendingSubtitle is { } heldSubtitle)
+        {
+            if (!LastReportedSubtitle.HasValue || Off(LastReportedSubtitle) != Off(heldSubtitle.Index))
+            {
+                PendingSubtitle = null;
+                dropped = true;
+            }
+            else if (subtitle && now - heldSubtitle.Since >= PlaybackMonitor.SettlePeriod)
+            {
+                settledSubtitle = heldSubtitle;
+                PendingSubtitle = null;
+            }
+        }
+
+        return settledAudio is null && settledSubtitle is null
+            ? null
+            : new SettledChange(UserId, ItemId, MediaSourceId, Client, settledAudio, settledSubtitle);
+    }
+
+    private static int Off(int? subtitle) => subtitle is { } s && s >= 0 ? s : -1;
+
     private static bool LiveCommand(DateTime? sentAt, DateTime now)
         => sentAt is { } sent && now >= sent && now - sent <= TimeSpan.FromSeconds(30);
 
@@ -228,6 +320,8 @@ public sealed class PlayRecord
         LastAudioChangedAt = null;
         LastSubtitleChangedAt = null;
         LastObservedAudio = null;
+        PendingAudio = null;
+        PendingSubtitle = null;
         CorrectionSentAt = null;
         ClearAudioCommand();
         ClearSubtitleCommand();

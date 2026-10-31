@@ -54,8 +54,8 @@ def run_checks(api, check, media):
 
     # ── Out of the box Babelfin is neutral: nothing chosen, so every item keeps Jellyfin's own tracks.
     status, admin, _ = api.get("/Babelfin/Admin/Settings")
-    check(status == 200 and admin.get("ConfigVersion") == 8 and admin.get("Everyday", {}).get("IsEmpty") is True and admin.get("Starter", {}).get("Enabled") is False,
-          f"Admin/Settings out of the box: version 8, everyday empty, the original-language rule off ({status}, {admin.get('ConfigVersion')}, starter {admin.get('Starter', {}).get('Enabled')})")
+    check(status == 200 and admin.get("ConfigVersion") == 9 and admin.get("Everyday", {}).get("IsEmpty") is True and admin.get("Starter", {}).get("Enabled") is False,
+          f"Admin/Settings out of the box: version 9, everyday empty, the original-language rule off ({status}, {admin.get('ConfigVersion')}, starter {admin.get('Starter', {}).get('Enabled')})")
     status, me0, _ = api.get("/Babelfin/Me/Settings")
     rows0 = [((me0 or {}).get("Defaults") or {}).get("AllLibraries") or {}] + list((((me0 or {}).get("Defaults") or {}).get("Libraries") or {}).values())
     check(status == 200 and len(rows0) >= 4 and all([s.get("Kind") for s in (r.get("AudioChain") or [])] == ["VideoDefault"] and r.get("WhenAudioUnderstood") == "VideoDefault" and r.get("WhenAudioNotUnderstood") == "VideoDefault" for r in rows0),
@@ -143,7 +143,7 @@ def run_checks(api, check, media):
 
     # ── Admin settings change applies live (cache invalidation on the real server).
     status, admin, _ = api.get("/Babelfin/Admin/Settings")
-    check(status == 200 and admin.get("ConfigVersion") == 8 and admin.get("Everyday", {}).get("WhenAudioNotUnderstood") == "Full", f"Admin/Settings: version 8 with the smart settings ({status})")
+    check(status == 200 and admin.get("ConfigVersion") == 9 and admin.get("Everyday", {}).get("WhenAudioNotUnderstood") == "Full", f"Admin/Settings: version 9 with the smart settings ({status})")
     admin["Everyday"] = dict(SMART_EVERYDAY, IfNothingMatches="PartialInMyLanguage")
     status, saved, _ = api.put("/Babelfin/Admin/Settings", admin)
     check(status == 200 and saved.get("Everyday", {}).get("IfNothingMatches") == "PartialInMyLanguage", f"PUT Admin/Settings: partial fallback saved ({status})")

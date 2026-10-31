@@ -188,6 +188,7 @@ public sealed partial class PlaybackBoundaryAdversarialTests
 
         h.Now = T0.AddMinutes(21);
         h.Report(h.First, 2, -1);
+        h.Settle(h.First, 2, -1);
         var memory = Assert.Single(h.Store.TryGet(h.User.Id)!.Overrides).Manual!;
         Assert.True(memory.SubtitlesOff);
         Assert.Null(memory.Subtitle);
@@ -213,6 +214,7 @@ public sealed partial class PlaybackBoundaryAdversarialTests
         h.Report(h.First, 2, 3); // A trusted app-selected subtitle, distinct from Babelfin's #4.
         h.Now = T0.AddMinutes(20);
         h.Report(h.First, 2, -1);
+        h.Settle(h.First, 2, -1);
         var memory = Assert.Single(h.Store.TryGet(h.User.Id)!.Overrides).Manual!;
         Assert.True(memory.SubtitlesOff);
         Assert.Null(memory.Subtitle);
@@ -233,6 +235,7 @@ public sealed partial class PlaybackBoundaryAdversarialTests
         }
         h.Now = T0.AddMinutes(20);
         h.Report(h.First, deferredAudio ? 2 : 5, deferredAudio ? -1 : 4);
+        h.Settle(h.First, deferredAudio ? 2 : 5, deferredAudio ? -1 : 4);
         var first = Assert.Single(h.Store.TryGet(h.User.Id)!.Overrides).Manual!;
         if (deferredAudio)
         {
@@ -251,6 +254,7 @@ public sealed partial class PlaybackBoundaryAdversarialTests
         // Only the unrelated stream's first deferred acknowledgement stays out of memory.
         h.Now = T0.AddMinutes(21);
         h.Report(h.First, 2, 4);
+        h.Settle(h.First, 2, 4);
         var afterAcknowledgement = Assert.Single(h.Store.TryGet(h.User.Id)!.Overrides).Manual!;
         Assert.Equal(deferredAudio ? null : "ja", afterAcknowledgement.Audio?.Language);
         Assert.False(afterAcknowledgement.SubtitlesOff);
@@ -264,6 +268,7 @@ public sealed partial class PlaybackBoundaryAdversarialTests
         }
         h.Now = T0.AddMinutes(22);
         h.Report(h.First, deferredAudio ? 1 : 2, -1);
+        h.Settle(h.First, deferredAudio ? 1 : 2, -1);
         var final = Assert.Single(h.Store.TryGet(h.User.Id)!.Overrides).Manual!;
         Assert.Equal(deferredAudio ? "en" : "ja", final.Audio!.Language);
         Assert.True(final.SubtitlesOff);
@@ -352,6 +357,7 @@ public sealed partial class PlaybackBoundaryAdversarialTests
         Assert.False(h.Registry.Get(h.Session.Id)!.ManualChanged);
         h.Now = T0.AddMinutes(41);
         h.Report(h.First, 2, -1);
+        h.Settle(h.First, 2, -1);
         Assert.True(Assert.Single(h.Store.TryGet(h.User.Id)!.Overrides).Manual!.SubtitlesOff);
     }
 
@@ -403,6 +409,7 @@ public sealed partial class PlaybackBoundaryAdversarialTests
         Assert.Equal(2, h.Commands.Count);
         h.Now = T0.AddMinutes(21);
         h.Report(h.First, 2, -1);
+        h.Settle(h.First, 2, -1);
         Assert.True(Assert.Single(h.Store.TryGet(h.User.Id)!.Overrides).Manual!.SubtitlesOff);
         Assert.Equal(2, h.Commands.Count);
     }
@@ -555,6 +562,7 @@ public sealed partial class PlaybackBoundaryAdversarialTests
         var request = await h.Request(h.First, audio: 1, subtitle: 3);
         Assert.Equal(1, request.ActionArguments["audioStreamIndex"]);
         Assert.Equal(3, request.ActionArguments["subtitleStreamIndex"]);
+        h.Settle(h.First, 1, 3);
         var manual = Assert.Single(h.Store.TryGet(h.User.Id)!.Overrides).Manual!;
         Assert.Equal("partial", manual.Subtitle!.Kind);
         Assert.Equal("en", manual.Audio!.Language);
@@ -591,12 +599,14 @@ public sealed partial class PlaybackBoundaryAdversarialTests
         h.Report(h.First, 1, 3);
         h.Now = T0.AddMinutes(2);
         await h.Request(h.First, audio ? 5 : 1, audio ? 3 : -1);
+        h.Report(h.First, audio ? 5 : 1, audio ? 3 : -1);
+        h.Settle(h.First, audio ? 5 : 1, audio ? 3 : -1);
         var firstMemory = Assert.Single(h.Store.TryGet(h.User.Id)!.Overrides).Manual!;
         if (audio) Assert.Equal("fr", firstMemory.Audio!.Language);
         else Assert.True(firstMemory.SubtitlesOff);
-        h.Report(h.First, audio ? 5 : 1, audio ? 3 : -1);
         h.Now = T0.AddMinutes(3);
         h.Report(h.First, audio ? 2 : 1, audio ? 3 : 4);
+        h.Settle(h.First, audio ? 2 : 1, audio ? 3 : 4);
         var finalMemory = Assert.Single(h.Store.TryGet(h.User.Id)!.Overrides).Manual!;
         if (audio) Assert.Equal("ja", finalMemory.Audio!.Language);
         else { Assert.False(finalMemory.SubtitlesOff); Assert.Equal("en", finalMemory.Subtitle!.Language); }
@@ -610,11 +620,13 @@ public sealed partial class PlaybackBoundaryAdversarialTests
         h.Now = T0.AddMinutes(2);
         await h.Request(h.First, 5, null);
         h.Report(h.First, 5, 3);
+        h.Settle(h.First, 5, 3);
         var before = Assert.Single(h.Store.TryGet(h.User.Id)!.Overrides).Manual!;
         Assert.Equal("fr", before.Audio!.Language);
         Assert.Null(before.Subtitle);
         h.Now = T0.AddMinutes(3);
         h.Report(h.First, 5, 4);
+        h.Settle(h.First, 5, 4);
         var after = Assert.Single(h.Store.TryGet(h.User.Id)!.Overrides).Manual!;
         Assert.Equal("fr", after.Audio!.Language);
         Assert.Null(after.Subtitle);
@@ -637,11 +649,14 @@ public sealed partial class PlaybackBoundaryAdversarialTests
         h.Now = start.AddSeconds(8);
         if (repeatRequest) await h.Request(h.First, audio ? 5 : 2, audio ? 4 : 3);
         h.Report(h.First, audio ? 5 : 2, audio ? 4 : 3);
+        h.Settle(h.First, audio ? 5 : 2, audio ? 4 : 3);
         var before = Assert.Single(h.Store.TryGet(h.User.Id)!.Overrides).Manual!;
         if (audio) Assert.Equal("fr", before.Audio!.Language);
         else Assert.Equal("partial", before.Subtitle!.Kind);
-        h.Now = start.AddSeconds(12);
+        // The start's correction command takes effect late, still within its lifetime.
+        h.Now = start.AddSeconds(22);
         h.Report(h.First, 2, 4);
+        h.Settle(h.First, 2, 4);
         var after = Assert.Single(h.Store.TryGet(h.User.Id)!.Overrides).Manual!;
         if (audio) Assert.Equal("fr", after.Audio!.Language);
         else Assert.Equal("partial", after.Subtitle!.Kind);
@@ -661,8 +676,10 @@ public sealed partial class PlaybackBoundaryAdversarialTests
         h.Report(h.First, 2, 4);
         h.Now = start.AddSeconds(8);
         h.Report(h.First, audio ? 5 : 2, audio ? 4 : 3);
-        h.Now = start.AddSeconds(12);
+        h.Settle(h.First, audio ? 5 : 2, audio ? 4 : 3);
+        h.Now = start.AddSeconds(22);
         h.Report(h.First, 2, 4);
+        h.Settle(h.First, 2, 4);
         var memory = Assert.Single(h.Store.TryGet(h.User.Id)!.Overrides).Manual!;
         if (audio) Assert.Equal("ja", memory.Audio!.Language);
         else Assert.Equal("full", memory.Subtitle!.Kind);
@@ -698,6 +715,7 @@ public sealed partial class PlaybackBoundaryAdversarialTests
         h.Report(h.First, audio ? null : 2, audio ? 4 : null);
         h.Now = start.AddMinutes(10);
         h.Report(h.First, audio ? 5 : 2, audio ? 4 : 3);
+        h.Settle(h.First, audio ? 5 : 2, audio ? 4 : 3);
         Assert.Empty(h.Commands);
         var memory = Assert.Single(h.Store.TryGet(h.User.Id)!.Overrides).Manual!;
         if (audio) Assert.Equal("fr", memory.Audio!.Language);
@@ -718,11 +736,15 @@ public sealed partial class PlaybackBoundaryAdversarialTests
         h.Report(h.First, 5, 4);
         h.Now = start.AddSeconds(66);
         h.Report(h.First, 5, -1);
+        h.Now = start.AddSeconds(70);
+        h.Report(h.First, 5, -1);
         Assert.False(Assert.Single(h.Store.TryGet(h.User.Id)!.Overrides).Manual!.SubtitlesOff);
         h.Now = start.AddSeconds(80);
         h.Report(h.First, 5, 3);
-        h.Now = start.AddSeconds(90);
+        h.Settle(h.First, 5, 3);
+        h.Now = start.AddSeconds(100);
         h.Report(h.First, 5, -1);
+        h.Settle(h.First, 5, -1);
         Assert.True(Assert.Single(h.Store.TryGet(h.User.Id)!.Overrides).Manual!.SubtitlesOff);
     }
 
@@ -758,6 +780,7 @@ public sealed partial class PlaybackBoundaryAdversarialTests
         h.Report(h.First, 5, 3);
         h.Now = start.AddSeconds(66);
         h.Report(h.First, 5, -1);
+        h.Settle(h.First, 5, -1);
         Assert.True(Assert.Single(h.Store.TryGet(h.User.Id)!.Overrides).Manual!.SubtitlesOff);
     }
 
@@ -773,8 +796,10 @@ public sealed partial class PlaybackBoundaryAdversarialTests
         h.Report(h.First, 1, 4);
         h.Now = start.AddSeconds(8);
         h.Report(h.First, 5, 4);
+        h.Settle(h.First, 5, 4);
         h.Now = start.AddSeconds(seconds);
         h.Report(h.First, 2, 4);
+        h.Settle(h.First, 2, 4);
         var memory = Assert.Single(h.Store.TryGet(h.User.Id)!.Overrides).Manual!;
         Assert.Equal(manual ? "ja" : "fr", memory.Audio!.Language);
     }
@@ -810,6 +835,8 @@ public sealed partial class PlaybackBoundaryAdversarialTests
         await h.Request(h.First);
         h.Report(h.First, 2, 4);
         h.Now = T0.AddMinutes(2);
+        h.Report(h.First, 5, 4);
+        h.Now += PlaybackMonitor.SettlePeriod;
         using var entered = new ManualResetEventSlim();
         using var release = new ManualResetEventSlim();
         var claimed = 0;
@@ -824,6 +851,7 @@ public sealed partial class PlaybackBoundaryAdversarialTests
         {
             Assert.True(entered.Wait(TimeSpan.FromSeconds(10)), "The first manual choice did not reach source lookup.");
             h.Report(h.First, 1, 4);
+            h.Settle(h.First, 1, 4);
             Assert.Equal("en", Assert.Single(h.Store.TryGet(h.User.Id)!.Overrides).Manual!.Audio!.Language);
         }
         finally { release.Set(); }
@@ -850,11 +878,13 @@ public sealed partial class PlaybackBoundaryAdversarialTests
         {
             Assert.True(entered.Wait(TimeSpan.FromSeconds(10)), "The request did not reach its manual-choice decision.");
             h.Report(h.First, 1, 4);
+            h.Settle(h.First, 1, 4);
             Assert.Equal("en", Assert.Single(h.Store.TryGet(h.User.Id)!.Overrides).Manual!.Audio!.Language);
         }
         finally { release.Set(); }
         await older;
         Assert.Equal(1, h.Registry.Get(h.Session.Id)!.ExpectedAudio);
+        h.Settle(h.First, 1, 4);
         Assert.Equal("en", Assert.Single(h.Store.TryGet(h.User.Id)!.Overrides).Manual!.Audio!.Language);
     }
 
@@ -865,6 +895,8 @@ public sealed partial class PlaybackBoundaryAdversarialTests
         await h.Request(h.First);
         h.Report(h.First, 2, 4);
         h.Now = T0.AddMinutes(2);
+        h.Report(h.First, 2, 3);
+        h.Now += PlaybackMonitor.SettlePeriod;
         using var entered = new ManualResetEventSlim();
         using var release = new ManualResetEventSlim();
         var claimed = 0;
@@ -879,6 +911,7 @@ public sealed partial class PlaybackBoundaryAdversarialTests
         {
             Assert.True(entered.Wait(TimeSpan.FromSeconds(10)));
             h.Report(h.First, 2, -1);
+            h.Settle(h.First, 2, -1);
             Assert.True(Assert.Single(h.Store.TryGet(h.User.Id)!.Overrides).Manual!.SubtitlesOff);
         }
         finally { release.Set(); }
@@ -895,6 +928,8 @@ public sealed partial class PlaybackBoundaryAdversarialTests
         await h.Request(h.First);
         h.Report(h.First, 2, 4);
         h.Now = T0.AddMinutes(2);
+        h.Report(h.First, 5, 4);
+        h.Now += PlaybackMonitor.SettlePeriod;
         using var entered = new ManualResetEventSlim();
         using var release = new ManualResetEventSlim();
         var claimed = 0;
@@ -910,6 +945,7 @@ public sealed partial class PlaybackBoundaryAdversarialTests
             Assert.True(entered.Wait(TimeSpan.FromSeconds(10)));
             h.Now = T0.AddMinutes(3);
             h.Report(h.First, 5, -1);
+            h.Settle(h.First, 5, -1);
             Assert.True(Assert.Single(h.Store.TryGet(h.User.Id)!.Overrides).Manual!.SubtitlesOff);
         }
         finally { release.Set(); }
@@ -926,6 +962,8 @@ public sealed partial class PlaybackBoundaryAdversarialTests
         await h.Request(h.First);
         h.Report(h.First, 2, 4);
         h.Now = T0.AddMinutes(2);
+        h.Report(h.First, 5, 4);
+        h.Now += PlaybackMonitor.SettlePeriod;
         using var entered = new ManualResetEventSlim();
         using var release = new ManualResetEventSlim();
         var claimed = 0;
@@ -942,6 +980,7 @@ public sealed partial class PlaybackBoundaryAdversarialTests
             h.Report(h.Second, 2, 4);
             h.Now = T0.AddMinutes(4);
             h.Report(h.Second, 1, 4);
+            h.Settle(h.Second, 1, 4);
             Assert.Equal("en", Assert.Single(h.Store.TryGet(h.User.Id)!.Overrides).Manual!.Audio!.Language);
         }
         finally { release.Set(); }
@@ -974,6 +1013,7 @@ public sealed partial class PlaybackBoundaryAdversarialTests
         var play = h.Registry.Get(h.Session.Id)!;
         Assert.Equal(1, play.ExpectedAudio);
         Assert.Equal(3, play.ExpectedSubtitle);
+        h.Settle(h.First, 1, 3);
         var memory = Assert.Single(h.Store.TryGet(h.User.Id)!.Overrides).Manual!;
         Assert.Equal("en", memory.Audio!.Language);
         Assert.NotNull(memory.Subtitle);
@@ -1031,6 +1071,7 @@ public sealed partial class PlaybackBoundaryAdversarialTests
         finally { release.Set(); }
         await older;
         Assert.Equal(1, h.Registry.Get(h.Session.Id)!.ExpectedAudio);
+        h.Settle(h.First, 1, 4);
         Assert.Equal("en", Assert.Single(h.Store.TryGet(h.User.Id)!.Overrides).Manual!.Audio!.Language);
     }
 
@@ -1066,6 +1107,7 @@ public sealed partial class PlaybackBoundaryAdversarialTests
         Assert.True(play.Playing);
         Assert.Equal(1, play.ExpectedAudio);
         Assert.Equal(5, request.ActionArguments["audioStreamIndex"]);
+        h.Settle(h.First, 1, 4);
         Assert.Equal("en", Assert.Single(h.Store.TryGet(h.User.Id)!.Overrides).Manual!.Audio!.Language);
     }
 
@@ -1223,6 +1265,7 @@ public sealed partial class PlaybackBoundaryAdversarialTests
         internal readonly DecoratorStats Stats;
         internal readonly List<GeneralCommand> Commands = new();
         internal readonly List<(LogLevel Level, string Message)> Logs = new();
+        internal readonly ListActivityLog Activity = new();
 
         internal Harness()
         {
@@ -1244,7 +1287,7 @@ public sealed partial class PlaybackBoundaryAdversarialTests
                 OnProfileResolved?.Invoke();
                 return resolved;
             }).Proxy;
-            var activity = new ListActivityLog();
+            var activity = Activity;
             Recorder = new TrackChangeRecorder(resolver, Store, activity, NullLogger<TrackChangeRecorder>.Instance);
             var sources = CallProxy.Create<IMediaSourceManager>((m, args) =>
             {
@@ -1314,6 +1357,13 @@ public sealed partial class PlaybackBoundaryAdversarialTests
             Session.PlayState.AudioStreamIndex = audio;
             Session.PlayState.SubtitleStreamIndex = subtitle;
             Invoke("HandleReport", new PlaybackProgressEventArgs { Session = Session, Item = item, MediaSourceId = SourceId });
+        }
+
+        // The tracks stay selected: a report one settle period later confirms the latest change.
+        internal void Settle(Episode item, int? audio, int? subtitle)
+        {
+            Now += PlaybackMonitor.SettlePeriod;
+            Report(item, audio, subtitle);
         }
 
         internal void Stop(Episode item) => Invoke("OnPlaybackStopped", null, new PlaybackStopEventArgs { Session = Session, Item = item });

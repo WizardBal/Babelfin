@@ -28,7 +28,7 @@
         Sdh: 'Neutral', Format: 'PreferText', Embedded: 'Neutral', IfNothingMatches: 'ShowNothing', Memory: 'RestOfShow'
     });
     // What "Restore defaults" clears: every option of the Subtitles, Audio and Track changes groups (HandleNextEpisode goes
-    // back to false too), and a person-level UnlabelledAudio left from before it became an admin-only setting.
+    // back to its default, on, too), and a person-level UnlabelledAudio left from before it became an admin-only setting.
     // My languages, Languages for subtitles, the on/off switch, the table and shows and movies are left alone.
     const RESTORED_FIELDS = Object.freeze(['IfNothingMatches', 'Format', 'Embedded', 'Sdh', 'PrefersSdh', 'UnlabelledAudio', 'UsesAudioDescription', 'AvoidCommentary',
         'UnknownAudioCountsAsUnderstood', 'Memory']);
@@ -1249,13 +1249,12 @@
             everydaySelect('UsesAudioDescription', { values: ['false', 'true'] }).element,
             everydaySelect('AvoidCommentary', { values: ['true', 'false'] }).element
         ]).element);
-        // "Replace Jellyfin's remembered tracks" is shown only to a person who has it on, so they can give Jellyfin its settings back: the
-        // app modes already replace the tracks Jellyfin copies to the next episode.
+        // On by default for everyone: jellyfin-web-based apps copy the previous episode's tracks to the next one by position, codec and language
+        // while Jellyfin's "Set audio/subtitle track based on previous item" are on, which overrides Babelfin's choice. The server turns those two
+        // settings off for this person and puts the original values back when the switch goes off.
         body.appendChild(advancedGroup('trackChanges', t('advanced.trackChanges'), t('advanced.trackChanges.help'), [
             everydaySelect('Memory').element,
-            state.base.HandleNextEpisode
-                ? switchRow(t('advanced.nextEpisode'), '', !!state.doc.HandleNextEpisode, function (on) { state.doc.HandleNextEpisode = on; }, t('advanced.nextEpisode.help'))
-                : null
+            switchRow(t('advanced.nextEpisode'), '', state.doc.HandleNextEpisode !== false, function (on) { state.doc.HandleNextEpisode = on; }, t('advanced.nextEpisode.help'))
         ]).element);
         const burned = advancedGroup('burnedIn', t('advanced.burnedIn'), t('advanced.burnedIn.help'), [buildBurnedIn()]);
         burnedGroup = burned.element;
@@ -1271,7 +1270,7 @@
 
     /**
      * "Restore defaults": after a confirmation, clears every option of the Subtitles, Audio and Track changes groups
-     * (RESTORED_FIELDS, and HandleNextEpisode back to false) in the unsaved document and shows the page again; nothing is sent until Save.
+     * (RESTORED_FIELDS, and HandleNextEpisode back on) in the unsaved document and shows the page again; nothing is sent until Save.
      */
     async function restoreDefaults() {
         const ok = await UI.confirm({ t: t, title: t('restore.confirm.title'), message: t('restore.confirm.text'), okText: t('restore.confirm.ok') });
@@ -1280,8 +1279,8 @@
         }
         const everyday = state.doc.Everyday;
         RESTORED_FIELDS.forEach(function (name) { UI.clearField(everyday, name); });
-        if (state.doc.HandleNextEpisode) {
-            state.doc.HandleNextEpisode = false;
+        if (state.doc.HandleNextEpisode === false) {
+            state.doc.HandleNextEpisode = true;
         }
         renderPage();
         const again = document.getElementById('bf-restore-defaults');

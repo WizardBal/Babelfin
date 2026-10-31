@@ -67,10 +67,11 @@ public partial class PluginConfiguration
         var visible = new[] { SettingsFields.UnlabelledAudio }.Concat(TrackDefaultFields).ToHashSet();
         ArchiveLayer(Everyday, visible, "server defaults", notes);
         foreach (var library in Libraries) ArchiveLayer(library.Settings, TrackDefaultFields.ToHashSet(), "library " + library.LibraryId, notes);
+        // HandleNextEpisode is not a template choice: ApplyTemplate never copies it, and every new person starts with it on.
         if (NewUserTemplate is { } template && (template.Everyday.SetFields().Any(f => f != SettingsFields.Understood)
             || template.Libraries.Count > 0 || template.SmartRules.Count > 0 || template.Overrides.Count > 0
             || template.CollectionOrder.Count > 0 || template.BurnedIn.Count > 0 || !template.Locks.IsEmpty
-            || !template.Enabled || template.HandleNextEpisode || template.PerLibrary.HasValue))
+            || !template.Enabled || template.PerLibrary.HasValue))
         {
             Retired.NewUserTemplate = template.Clone();
             NewUserTemplate = new PersonSettings { Everyday = new SettingsLayer { Understood = template.Everyday.Understood?.ToArray() } };

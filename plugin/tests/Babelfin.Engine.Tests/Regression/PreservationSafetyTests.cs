@@ -290,10 +290,117 @@ public sealed class PreservationSafetyTests : IDisposable
         Assert.True(store.TryGet(user.Id)!.HandleNextEpisode);
     }
 
+    [Theory]
+    [InlineData(true)]
+    [InlineData(false)]
+    public async Task StartupTurnsOffFlagsForMigratedPeople_ButNotForDisabledOrOptedOutPeople(bool serverEnabled)
+    {
+        NewPlugin(new PluginConfiguration { ConfigVersion = PluginConfiguration.CurrentVersion, Enabled = serverEnabled });
+        var store = NewStore();
+        var migrated = NewUser(true, false);
+        var disabled = NewUser(true, true);
+        var optedOut = NewUser(true, true);
+        WritePerson(store, migrated.Id, "{\"schemaVersion\":3,\"enabled\":true,\"handleNextEpisode\":false}");
+        WritePerson(store, disabled.Id, "{\"schemaVersion\":3,\"enabled\":false,\"handleNextEpisode\":false}");
+        WritePerson(store, optedOut.Id, "{\"schemaVersion\":" + PersonSettings.CurrentSchemaVersion + ",\"enabled\":true,\"handleNextEpisode\":false}");
+        var users = Users(migrated, disabled, optedOut);
+        var flags = new RememberFlags(users, store, new ListActivityLog(), NullLogger<RememberFlags>.Instance);
+        using var services = new ServiceCollection().AddSingleton<IPersonStore>(store).AddSingleton<IUserManager>(users).AddSingleton<IRememberFlags>(flags).BuildServiceProvider();
+
+        await BabelfinStartupFilter.SynchronizeFlagsAsync(services);
+
+        Assert.True(store.TryGet(migrated.Id)!.HandleNextEpisode);
+        Assert.True(store.TryGet(disabled.Id)!.HandleNextEpisode);
+        Assert.False(store.TryGet(optedOut.Id)!.HandleNextEpisode);
+        if (serverEnabled)
+        {
+            Assert.False(migrated.RememberAudioSelections);
+            Assert.False(migrated.RememberSubtitleSelections);
+            AssertUndoRecord(store, migrated.Id, true, false);
+        }
+        else
+        {
+            Assert.True(migrated.RememberAudioSelections);
+            Assert.Null(store.TryGet(migrated.Id)!.JellyfinChanges);
+        }
+
+        foreach (var untouched in new[] { disabled, optedOut })
+        {
+            Assert.True(untouched.RememberAudioSelections);
+            Assert.True(untouched.RememberSubtitleSelections);
+            Assert.Null(store.TryGet(untouched.Id)!.JellyfinChanges);
+        }
+    }
+
+    [Fact]
+    public async Task PeopleCreatedAfterStartupGetTheirFlagsTurnedOff()
+    {
+        NewPlugin(new PluginConfiguration { ConfigVersion = PluginConfiguration.CurrentVersion });
+        var store = NewStore();
+        var existing = NewUser(true, true);
+        store.Save(new PersonSettings { UserId = existing.Id });
+        var created = NewUser(true, false);
+        var users = Users(existing, created);
+        var flags = new RememberFlags(users, store, new ListActivityLog(), NullLogger<RememberFlags>.Instance);
+        using var services = new ServiceCollection().AddSingleton<IPersonStore>(store).AddSingleton<IUserManager>(users).AddSingleton<IRememberFlags>(flags).BuildServiceProvider();
+        BabelfinStartupFilter.WatchNewPeople(services);
+
+        // People stored before the watch started are the startup synchronization's.
+        Assert.True(store.Update(existing.Id, current => { var copy = current!.Clone(); copy.UserName = "Existing"; return copy; }));
+        store.GetOrCreate(created.Id, () => new PersonSettings { UserName = "Created" });
+        for (var i = 0; i < 200 && store.TryGet(created.Id)!.JellyfinChanges is null; i++) await Task.Delay(25);
+
+        AssertUndoRecord(store, created.Id, true, false);
+        for (var i = 0; i < 200 && created.RememberAudioSelections; i++) await Task.Delay(25);
+        Assert.False(created.RememberAudioSelections);
+        Assert.False(created.RememberSubtitleSelections);
+        Assert.True(existing.RememberAudioSelections);
+        Assert.Null(store.TryGet(existing.Id)!.JellyfinChanges);
+    }
+
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task ResetWhileServerDisabledRestoresFlagsAndReportsFailures(bool fail)
+    {
+        NewPlugin(new PluginConfiguration { ConfigVersion = PluginConfiguration.CurrentVersion, Enabled = false });
+        var store = NewStore();
+        var user = NewUser(false, false);
+        store.Save(new PersonSettings { UserId = user.Id, HandleNextEpisode = true, JellyfinChanges = new() { RememberAudioSelections = true, RememberSubtitleSelections = true } });
+        var users = CallProxy.Create<IUserManager>((method, args) =>
+        {
+            if (method.Name == "GetUserById") return (Guid)args[0]! == user.Id ? user : null;
+            if (method.Name != "UpdateConfigurationAsync") return null;
+            if (fail) throw new IOException("Jellyfin update failed");
+            var config = (UserConfiguration)args[1]!;
+            user.RememberAudioSelections = config.RememberAudioSelections;
+            user.RememberSubtitleSelections = config.RememberSubtitleSelections;
+            return Task.CompletedTask;
+        }).Proxy;
+        var flags = new RememberFlags(users, store, new ListActivityLog(), NullLogger<RememberFlags>.Instance);
+        var admin = ApiSafetyHost.Admin(store, flags, user);
+
+        var report = await admin.ResetPeopleAsync("backup.json");
+
+        Assert.Equal(fail ? 0 : 1, report.People);
+        Assert.Equal(fail ? new[] { user.Username } : Array.Empty<string>(), report.FailedNames);
+        Assert.Equal(fail ? 500 : 200, admin.ResetResult(report).StatusCode);
+        Assert.True(store.TryGet(user.Id)!.HandleNextEpisode);
+        Assert.Equal(fail, store.TryGet(user.Id)!.JellyfinChanges is not null);
+        Assert.Equal(!fail, user.RememberAudioSelections);
+        Assert.Equal(!fail, user.RememberSubtitleSelections);
+    }
+
     private const int FutureSchema = PersonSettings.CurrentSchemaVersion + 10;
     private const int FutureConfig = PluginConfiguration.CurrentVersion + 10;
     private PersonStore NewStore() => new(Path.Combine(_folder, Guid.NewGuid().ToString("N")), NullLogger<PersonStore>.Instance);
     private PluginHost NewPlugin(PluginConfiguration config, bool blockBackups = false) => new(Path.Combine(_folder, Guid.NewGuid().ToString("N")), config, blockBackups);
+
+    private static void WritePerson(PersonStore store, Guid id, string json)
+    {
+        Directory.CreateDirectory(Path.GetDirectoryName(store.FilePath(id))!);
+        File.WriteAllText(store.FilePath(id), json);
+    }
 
     private static byte[] WriteFuturePerson(PersonStore store, Guid id)
     {

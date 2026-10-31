@@ -247,7 +247,7 @@ public class PersonSettings
     internal Guid StorageEpoch { get; set; }
 
     /// <summary>The current schema version of the per-person file.</summary>
-    public const int CurrentSchemaVersion = 3;
+    public const int CurrentSchemaVersion = 4;
 
     /// <summary>Gets or sets the schema version this document was written with.</summary>
     public int SchemaVersion { get; set; } = CurrentSchemaVersion;
@@ -269,8 +269,10 @@ public class PersonSettings
     /// library; null = automatic (<see cref="TableModes.PersonPerLibrary"/>).</summary>
     public bool? PerLibrary { get; set; }
 
-    /// <summary>Gets or sets a value indicating whether Babelfin handles next-episode tracks for this person by turning off their Jellyfin remember flags (off by default; the old values are kept in <see cref="JellyfinChanges"/>).</summary>
-    public bool HandleNextEpisode { get; set; }
+    /// <summary>Gets or sets a value indicating whether Babelfin handles next-episode tracks for this person by turning off their Jellyfin remember flags
+    /// ("Set audio track based on previous item" and "Set subtitle track based on previous item"); on by default, and the old values are kept in
+    /// <see cref="JellyfinChanges"/>.</summary>
+    public bool HandleNextEpisode { get; set; } = true;
 
     /// <summary>Gets or sets what Babelfin changed in this person's Jellyfin settings, or null.</summary>
     public JellyfinChanges? JellyfinChanges { get; set; }

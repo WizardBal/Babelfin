@@ -117,7 +117,7 @@ public class PreferenceApiTests
         if (schema == 1) person.SmartRules.Add(row);
         else person.Retired.GenreRules.Add(row);
         PersonStore.Migrate(person);
-        Assert.Equal(3, person.SchemaVersion);
+        Assert.Equal(PersonSettings.CurrentSchemaVersion, person.SchemaVersion);
         Assert.Equal("genre-one", Assert.Single(person.SmartRules).Id);
         Assert.Equal("ja", Assert.Single(person.Retired.GenreRules).Settings.AudioChain![0].Language);
         var notes = person.MigrationNotes.ToArray();
@@ -151,7 +151,7 @@ public class PreferenceApiTests
         var admin = new PluginConfiguration { ConfigVersion = 7 };
         admin.Retired.GenreRules.Add(Genre("Anime", Audio("ja"), "stable"));
         Assert.True(admin.Upgrade());
-        Assert.Equal(8, admin.ConfigVersion);
+        Assert.Equal(PluginConfiguration.CurrentVersion, admin.ConfigVersion);
         Assert.Single(admin.SmartRules);
         Assert.Single(admin.Retired.GenreRules);
         var clone = ImportPlanner.CloneAdmin(admin);
@@ -181,11 +181,11 @@ public class PreferenceApiTests
             Jellyfin.Plugin.Babelfin.Engine.Languages.LanguageTable.Default, a => applied = a, false);
         Assert.True(result.Applied, string.Join("; ", result.Warnings));
         Assert.NotNull(applied);
-        Assert.Equal(8, applied.ConfigVersion);
+        Assert.Equal(PluginConfiguration.CurrentVersion, applied.ConfigVersion);
         Assert.Equal("admin-row", Assert.Single(applied.SmartRules).Id);
         Assert.Single(applied.Retired.GenreRules);
         var imported = store.TryGet(person.UserId)!;
-        Assert.Equal(3, imported.SchemaVersion);
+        Assert.Equal(PersonSettings.CurrentSchemaVersion, imported.SchemaVersion);
         Assert.Equal("person-row", Assert.Single(imported.SmartRules).Id);
         Assert.Single(imported.Retired.GenreRules);
     }
@@ -316,7 +316,7 @@ public class ConfigurationBackupTests
         try
         {
             var paths = Babelfin.Engine.Tests.Settings.CallProxy.Create<MediaBrowser.Common.Configuration.IApplicationPaths>((m, _) => m.ReturnType == typeof(string) ? folder : null).Proxy;
-            var seed = new PluginConfiguration { ConfigVersion = 8 };
+            var seed = new PluginConfiguration { ConfigVersion = PluginConfiguration.CurrentVersion };
             var serializer = Babelfin.Engine.Tests.Settings.CallProxy.Create<MediaBrowser.Model.Serialization.IXmlSerializer>((m, _) => m.Name.StartsWith("Deserialize", StringComparison.Ordinal) ? seed : null).Proxy;
             var first = new Jellyfin.Plugin.Babelfin.Plugin(paths, serializer);
             var path = first.ConfigurationFilePath;
@@ -326,7 +326,7 @@ public class ConfigurationBackupTests
             seed = new PluginConfiguration { ConfigVersion = 7 };
             seed.Retired.GenreRules.Add(PreferenceApiTests.Genre("Anime", PreferenceApiTests.Audio("ja")));
             var migrated = new Jellyfin.Plugin.Babelfin.Plugin(paths, serializer);
-            Assert.Equal(8, migrated.Configuration.ConfigVersion);
+            Assert.Equal(PluginConfiguration.CurrentVersion, migrated.Configuration.ConfigVersion);
             Assert.Single(migrated.Configuration.SmartRules);
             Assert.Equal(original, File.ReadAllText(Assert.Single(Directory.GetFiles(migrated.BackupsFolder, "settings-version7-*.xml"))));
         }

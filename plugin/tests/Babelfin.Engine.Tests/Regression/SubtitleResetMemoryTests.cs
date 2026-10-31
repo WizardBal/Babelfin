@@ -29,6 +29,7 @@ public sealed partial class PlaybackBoundaryAdversarialTests
         h.Now = T0.AddSeconds(70).AddTicks(extraTicks);
         if (playbackInfo) await h.Request(h.First, subtitle: -1);
         h.Report(h.First, 5, -1);
+        h.Settle(h.First, 5, -1);
         Assert.Equal(extraTicks > 0, h.Store.TryGet(h.User.Id)!.Overrides.Exists(o => o.Manual?.SubtitlesOff == true));
     }
 
@@ -45,6 +46,7 @@ public sealed partial class PlaybackBoundaryAdversarialTests
         var request = await h.Request(h.First, 5, -1);
         Assert.Equal(-1, request.ActionArguments["subtitleStreamIndex"]);
         h.Report(h.First, 5, -1);
+        h.Settle(h.First, 5, -1);
         Assert.DoesNotContain(h.Store.TryGet(h.User.Id)!.Overrides, o => o.Manual?.SubtitlesOff == true);
     }
 
@@ -67,6 +69,7 @@ public sealed partial class PlaybackBoundaryAdversarialTests
         h.Now = T0.AddSeconds(66);
         if (playbackInfo) await h.Request(h.First, subtitle: -1);
         h.Report(h.First, 5, -1);
+        h.Settle(h.First, 5, -1);
         Assert.True(Assert.Single(h.Store.TryGet(h.User.Id)!.Overrides).Manual!.SubtitlesOff);
     }
 }
