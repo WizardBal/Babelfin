@@ -62,8 +62,8 @@ public sealed class StreamBuilderSelectionTests : IDisposable
         return data;
     }
 
-    private const string TranscodeOnly = "transcode-only";
-    private const string DirectPlay = "direct-play";
+    internal const string TranscodeOnly = "transcode-only";
+    internal const string DirectPlay = "direct-play";
 
     [Theory]
     [MemberData(nameof(JellyfinStates))]
@@ -305,7 +305,7 @@ public sealed class StreamBuilderSelectionTests : IDisposable
     };
 
     /// <summary>Calls Jellyfin's StreamBuilder as MediaInfoHelper.SetDeviceSpecificData does; null indices mean the request named none.</summary>
-    private static StreamInfo Build(MediaSourceInfo source, string profile, int? audio = null, int? subtitle = null)
+    internal static StreamInfo Build(MediaSourceInfo source, string profile, int? audio = null, int? subtitle = null)
     {
         var transcoder = CallProxy.Create<ITranscoderSupport>((method, _) => method.ReturnType == typeof(bool) ? true : null).Proxy;
         var builder = new StreamBuilder(transcoder, NullLogger.Instance);

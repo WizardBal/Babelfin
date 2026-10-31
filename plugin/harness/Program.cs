@@ -478,7 +478,7 @@ async Task<Resp> Send(TestHost h, HttpMethod method, string url, Dictionary<stri
     return new Resp((int)res.StatusCode, all, bytes);
 }
 
-const string Tag = "<script src=\"/Babelfin/client.js?v=0.19.0.0\" defer></script>";
+const string Tag = "<script src=\"/Babelfin/client.js?v=0.20.0.0\" defer></script>";
 int Count(string text, string what) => Regex.Matches(text, Regex.Escape(what)).Count;
 
 foreach (var variant in new[] { "plain", "companion-after", "companion-before" })
@@ -546,10 +546,10 @@ foreach (var variant in new[] { "plain", "companion-after", "companion-before" }
     var hb = await StartAsync(variant, baseUrl: "jellyfin/");
     var rb = await Send(hb, HttpMethod.Get, "/jellyfin/web/");
     Save($"{variant}_baseurl.html", rb.Body);
-    Check(rb.Status == 200 && Count(rb.Text, "<script src=\"/jellyfin/Babelfin/client.js?v=0.19.0.0\" defer></script>") == 1 && (!withCompanion || rb.Text.Contains("<!-- Companion -->")),
+    Check(rb.Status == 200 && Count(rb.Text, "<script src=\"/jellyfin/Babelfin/client.js?v=0.20.0.0\" defer></script>") == 1 && (!withCompanion || rb.Text.Contains("<!-- Companion -->")),
         $"[{variant}] base URL: /jellyfin/web/ injected with /jellyfin/Babelfin/client.js");
     Check((await Send(hb, HttpMethod.Get, "/web/")).Status == 404, $"[{variant}] base URL: bare /web/ left alone (404)");
-    Check((await Send(hb, HttpMethod.Get, "/jellyfin/Babelfin/client.js?v=0.19.0.0")).Status == 200, $"[{variant}] base URL: script served at /jellyfin/Babelfin/client.js");
+    Check((await Send(hb, HttpMethod.Get, "/jellyfin/Babelfin/client.js?v=0.20.0.0")).Status == 200, $"[{variant}] base URL: script served at /jellyfin/Babelfin/client.js");
     await hb.DisposeAsync();
 
     // Web client not hosted / HTTPS required
@@ -572,15 +572,15 @@ Section("C. Controller");
     var user = new Dictionary<string, string> { ["X-Fake-User"] = viewerOne.Id.ToString("N") };
     var admin = new Dictionary<string, string> { ["X-Fake-User"] = viewerOne.Id.ToString("N"), ["X-Fake-Admin"] = "1" };
 
-    var js = await Send(h, HttpMethod.Get, "/Babelfin/client.js?v=0.19.0.0");
+    var js = await Send(h, HttpMethod.Get, "/Babelfin/client.js?v=0.20.0.0");
     Save("client.js", js.Body);
     Check(js.Status == 200 && js.H("Content-Type").StartsWith("text/javascript") && js.Text.Contains("jellyfin_credentials")
-        && js.H("Cache-Control").Contains("immutable") && js.H("Cache-Control").Contains("max-age=31536000"), $"GET /Babelfin/client.js?v=0.19.0.0: 200 text/javascript, immutable ({js.H("Cache-Control")})");
+        && js.H("Cache-Control").Contains("immutable") && js.H("Cache-Control").Contains("max-age=31536000"), $"GET /Babelfin/client.js?v=0.20.0.0: 200 text/javascript, immutable ({js.H("Cache-Control")})");
     var jsNoV = await Send(h, HttpMethod.Get, "/Babelfin/client.js");
     Check(jsNoV.Status == 200 && jsNoV.H("Cache-Control") == "no-cache", $"GET /Babelfin/client.js without v: no-cache ({jsNoV.H("Cache-Control")})");
-    var js304 = await Send(h, HttpMethod.Get, "/Babelfin/client.js?v=0.19.0.0", new() { ["If-None-Match"] = js.H("ETag") });
+    var js304 = await Send(h, HttpMethod.Get, "/Babelfin/client.js?v=0.20.0.0", new() { ["If-None-Match"] = js.H("ETag") });
     Check(js304.Status == 304 && js304.Body.Length == 0, $"client.js 304 on matching ETag {js.H("ETag")}");
-    var jsBr = await Send(h, HttpMethod.Get, "/Babelfin/client.js?v=0.19.0.0", new() { ["Accept-Encoding"] = "br" });
+    var jsBr = await Send(h, HttpMethod.Get, "/Babelfin/client.js?v=0.20.0.0", new() { ["Accept-Encoding"] = "br" });
     Check(jsBr.H("Content-Encoding") == "br" && Decode(jsBr.Body, "br").SequenceEqual(js.Body), "client.js brotli decodes to the same script");
 
     var appPage = await Send(h, HttpMethod.Get, "/Babelfin/app");
@@ -591,7 +591,7 @@ Section("C. Controller");
     var ping = await Send(h, HttpMethod.Get, "/Babelfin/Ping", user);
     Save("ping.json", ping.Body);
     Check(ping401.Status == 401, $"GET /Babelfin/Ping without a user: 401 ({ping401.Status})");
-    Check(ping.Status == 200 && ping.Text.Contains("\"wrapped\":true") && ping.Text.Contains("\"version\":\"0.19.0.0\""), "GET /Babelfin/Ping signed in: 200 " + ping.Text);
+    Check(ping.Status == 200 && ping.Text.Contains("\"wrapped\":true") && ping.Text.Contains("\"version\":\"0.20.0.0\""), "GET /Babelfin/Ping signed in: 200 " + ping.Text);
 
     SetConfig("jpn", "eng");
     var explain = await Send(h, HttpMethod.Get, $"/Babelfin/Me/Explain?itemId={slvId:N}", user);

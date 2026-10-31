@@ -6,7 +6,7 @@ Audio and subtitle preferences for each person, genre, library, show, and movie 
 
 Babelfin helps when episodes have tracks in different orders, a file marks Signs & Songs as its default subtitle, or people in one household want different languages. Set your preferences once and Babelfin matches them against the tracks available for each title.
 
-**0.19.0.0 — First public beta (`v0.19.0-beta.1`)** by [WizardBal](https://github.com/WizardBal).
+**0.20.0.0 — Beta (`v0.20.0-beta.1`)** by [WizardBal](https://github.com/WizardBal).
 
 AI tools are used for development, review and all translations. Tested with Jellyfin 12.4 and the Jellyfin Android app on Google Pixel 11 Pro XL. Automated integration tests use Jellyfin Web on a disposable Jellyfin 12.2 test instance. Android TV, Swiftfin, Streamyfin and physical TVs have not been tested.
 
@@ -22,21 +22,21 @@ Add this repository address in **Dashboard → Plugins → Repositories** (or **
 https://github.com/WizardBal/Babelfin/releases/download/catalog/manifest.json
 ```
 
-Install **Babelfin** from the plugin **Catalog**, restart Jellyfin, and confirm version **0.19.0.0** is **Active** in **Dashboard → Plugins**. Open Babelfin there to configure it.
+Install **Babelfin** from the plugin **Catalog**, restart Jellyfin, and confirm version **0.20.0.0** is **Active** in **Dashboard → Plugins**. Open Babelfin there to configure it.
 
 Jellyfin checks the catalog for newer versions. New catalog installations allow automatic plugin updates; restart Jellyfin after an update. You can also install updates from the catalog manually. For a manual installation, follow the update instructions below.
 
 ### Manual installation
 
-The [beta release](https://github.com/WizardBal/Babelfin/releases/tag/v0.19.0-beta.1) contains seven files:
+The [beta release](https://github.com/WizardBal/Babelfin/releases/tag/v0.20.0-beta.1) contains seven files:
 
 | File | Purpose |
 | --- | --- |
-| `Babelfin-0.19.0.0.zip` | Plugin DLL, license, attribution, logo and Jellyfin metadata. |
-| `Babelfin-0.19.0.0.zip.md5` | Checksum used by Jellyfin's plugin catalog. |
-| `Babelfin-0.19.0.0.zip.sha256` | SHA-256 verification of the plugin ZIP. |
-| `Babelfin-0.19.0.0-source.zip` | Corresponding source, embedded assets and build scripts. |
-| `Babelfin-0.19.0.0-source.zip.sha256` | SHA-256 verification of the source archive. |
+| `Babelfin-0.20.0.0.zip` | Plugin DLL, license, attribution, logo and Jellyfin metadata. |
+| `Babelfin-0.20.0.0.zip.md5` | Checksum used by Jellyfin's plugin catalog. |
+| `Babelfin-0.20.0.0.zip.sha256` | SHA-256 verification of the plugin ZIP. |
+| `Babelfin-0.20.0.0-source.zip` | Corresponding source, embedded assets and build scripts. |
+| `Babelfin-0.20.0.0-source.zip.sha256` | SHA-256 verification of the source archive. |
 | `manifest.json` | Plugin catalog metadata, also published in the separate `catalog` release. |
 | `NOTICE` | Upstream attribution and dependency inventory, also included in both ZIPs. |
 
@@ -44,12 +44,12 @@ The [beta release](https://github.com/WizardBal/Babelfin/releases/tag/v0.19.0-be
 
    ```sh
    # Linux
-   sha256sum -c Babelfin-0.19.0.0.zip.sha256
+   sha256sum -c Babelfin-0.20.0.0.zip.sha256
    # macOS
-   shasum -a 256 -c Babelfin-0.19.0.0.zip.sha256
+   shasum -a 256 -c Babelfin-0.20.0.0.zip.sha256
    ```
 
-   In Windows PowerShell, run `(Get-FileHash .\Babelfin-0.19.0.0.zip -Algorithm SHA256).Hash.ToLowerInvariant()` and compare it with the digest before the filename in `Babelfin-0.19.0.0.zip.sha256`. Continue when the digests match. A checksum detects damaged or mismatched downloads; it is not an independent signature.
+   In Windows PowerShell, run `(Get-FileHash .\Babelfin-0.20.0.0.zip -Algorithm SHA256).Hash.ToLowerInvariant()` and compare it with the digest before the filename in `Babelfin-0.20.0.0.zip.sha256`. Continue when the digests match. A checksum detects damaged or mismatched downloads; it is not an independent signature.
 
 2. Find the `plugins` folder inside Jellyfin's data directory. In Jellyfin 12.2, **Dashboard → Paths → Data** shows that directory; custom data paths override these defaults:
 
@@ -63,9 +63,9 @@ The [beta release](https://github.com/WizardBal/Babelfin/releases/tag/v0.19.0-be
 
    See Jellyfin's [server paths](https://jellyfin.org/docs/general/administration/configuration/), [container storage](https://jellyfin.org/docs/general/installation/container/) and [TrueNAS configuration](https://jellyfin.org/docs/general/installation/advanced/truenas/). Direct Windows launches can use `%LocalAppData%\jellyfin` instead; check **Paths** for the running server.
 
-3. Create `Babelfin_0.19.0.0` inside the plugins folder. Extract the ZIP's five files directly into it: `Jellyfin.Plugin.Babelfin.dll`, `meta.json`, `logo.png`, `LICENSE` and `NOTICE`.
-4. Make sure the account Jellyfin runs as can read that directory and its files. Docker uses the container's configured user. For the default TrueNAS user, run `chown -R 568:568 "/path/to/plugins/Babelfin_0.19.0.0"`, replacing the path with this plugin folder. If the app uses a custom user or group, use those IDs.
-5. Restart Jellyfin and confirm **Babelfin 0.19.0.0** is **Active** in **Dashboard → Plugins**.
+3. Create `Babelfin_0.20.0.0` inside the plugins folder. Extract the ZIP's five files directly into it: `Jellyfin.Plugin.Babelfin.dll`, `meta.json`, `logo.png`, `LICENSE` and `NOTICE`.
+4. Make sure the account Jellyfin runs as can read that directory and its files. Docker uses the container's configured user. For the default TrueNAS user, run `chown -R 568:568 "/path/to/plugins/Babelfin_0.20.0.0"`, replacing the path with this plugin folder. If the app uses a custom user or group, use those IDs.
+5. Restart Jellyfin and confirm **Babelfin 0.20.0.0** is **Active** in **Dashboard → Plugins**.
 6. **Updating a manual install:** extract the new version into its own `Babelfin_<version>` folder next to the old version, then restart. In a Jellyfin 12.2 test, the new version became Active and Jellyfin removed the old plugin folder automatically. Settings remained outside those version folders. If you want to keep the old plugin files, move that folder out of the plugins folder before restarting. Confirm the new version is Active afterward.
 
 You can add the catalog repository at any time to receive update notices.
@@ -206,7 +206,7 @@ The binding check loads Jellyfin 12.2 assemblies. The UI smoke suites use fake D
 
 A corresponding-source archive contains the tracked tree and a `SOURCE.json` record with its commit, tree, intended tag and version. It includes the language input used by `tools/gen_languages.py`. To rebuild a source archive without Git metadata, pass its recorded commit as `-p:SourceRevisionId=COMMIT` when building. For a byte comparison with the release DLL, use a clean Git checkout of that commit and the same pinned SDK.
 
-Release preparation from that clean checkout uses `tools/package.py` with the commit's timestamp and `tools/source_archive.py --commit COMMIT --tag v0.19.0-beta.1 --output OUTPUT_DIRECTORY`. Without `--output`, the package command writes to `dist/`. Packaging refuses a dirty source tree or a DLL whose assembly version, file version, hash or informational-version commit differs from the source. The metadata reader does not execute the plugin DLL. Neither command publishes anything. The binding checker accepts `--source-commit COMMIT` after the plugin output folder to check the DLL's informational version.
+Release preparation from that clean checkout uses `tools/package.py` with the commit's timestamp and `tools/source_archive.py --commit COMMIT --tag v0.20.0-beta.1 --output OUTPUT_DIRECTORY`. Without `--output`, the package command writes to `dist/`. Packaging refuses a dirty source tree or a DLL whose assembly version, file version, hash or informational-version commit differs from the source. The metadata reader does not execute the plugin DLL. Neither command publishes anything. The binding checker accepts `--source-commit COMMIT` after the plugin output folder to check the DLL's informational version.
 
 See [contribution and translation instructions](CONTRIBUTING.md).
 

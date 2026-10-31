@@ -107,7 +107,7 @@ const SPEC = {
     resetButton: 'Reset all settings',
     resetDone: 'All settings were reset.',
     // Server versions and app defaults.
-    pluginVersion: '0.19.0.0',
+    pluginVersion: '0.20.0.0',
     configVersion: 9,
     personSchemaVersion: 4,
     desktop: 'Jellyfin Desktop',

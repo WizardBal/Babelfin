@@ -301,7 +301,7 @@ function createServer(opts) {
         puts: [],
         userPuts: [],
         requests: [],
-        status: { version: '0.19.0.0', wrapped: opts.wrapped !== false, staticCalls: 98765, playbackCalls: 4321, applied: 777, decisionsCached: 55, lastUpgradeNote: UPGRADE_NOTE },
+        status: { version: '0.20.0.0', wrapped: opts.wrapped !== false, staticCalls: 98765, playbackCalls: 4321, applied: 777, decisionsCached: 55, lastUpgradeNote: UPGRADE_NOTE },
         simPosts: [],
         jobs: {},
         activityQueries: [],

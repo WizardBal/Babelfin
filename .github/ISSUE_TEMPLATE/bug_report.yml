@@ -19,7 +19,7 @@ body:
     attributes:
       label: Babelfin version
       description: Copy the installed version from Dashboard → Plugins.
-      placeholder: "For example, 0.19.0.0 beta"
+      placeholder: "For example, 0.20.0.0 beta"
     validations:
       required: true
   - type: dropdown

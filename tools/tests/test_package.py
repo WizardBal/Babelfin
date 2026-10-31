@@ -99,13 +99,13 @@ class PackageTests(unittest.TestCase):
         self.assertTrue(callable(loaded['main']))
         self.assertTrue(callable(loaded['create_package']))
 
-    def test_default_changelog_describes_first_public_beta_and_config_is_preserved(self):
+    def test_default_changelog_describes_current_release_and_config_is_preserved(self):
         result = self.package()
         with zipfile.ZipFile(result['zip']) as archive:
             text = json.loads(archive.read('meta.json'))['changelog']
-        self.assertIn('first public beta', text.lower())
+        self.assertTrue(text.startswith('Track choices across autoplay and native players.'))
         self.assertIn('audio', text.lower())
-        self.assertIn('subtitles', text.lower())
+        self.assertIn('subtitle', text.lower())
         self.assertNotRegex(text, r'(?i)private|0\.14|\bF[0-9]+(?:\.[0-9]+)*\b')
         changelog = 'First public beta: audio and subtitles. Préférences per person.'
         explicit = self.package('explicit-changelog', changelog=changelog, source_url='https://example.invalid/beta.zip')
@@ -469,13 +469,13 @@ class PackageTests(unittest.TestCase):
         config = json.loads((ROOT / 'release-config.json').read_text())
         self.assertEqual({
             'project_url': 'https://github.com/WizardBal/Babelfin',
-            'source_url': 'https://github.com/WizardBal/Babelfin/releases/download/v0.19.0-beta.1/Babelfin-0.19.0.0.zip',
+            'source_url': 'https://github.com/WizardBal/Babelfin/releases/download/v0.20.0-beta.1/Babelfin-0.20.0.0.zip',
             'repository_url': 'https://github.com/WizardBal/Babelfin/releases/download/catalog/manifest.json',
             'image_url': 'https://raw.githubusercontent.com/WizardBal/Babelfin/main/plugin/package/logo.png',
         }, {key: value for key, value in config.items() if key != 'changelog'})
         self.assertIsInstance(config['changelog'], str)
         self.assertTrue(config['changelog'].strip())
-        self.assertIn('beta', config['changelog'].lower())
+        self.assertTrue(config['changelog'].startswith('Track choices across autoplay and native players.'))
         self.assertIn("android tv, swiftfin, streamyfin and physical tvs have not been tested", config['changelog'].lower())
         self.assertNotRegex(config['changelog'], r'\bF[0-9]+(?:\.[0-9]+)*\b')
         self.assertNotIn('timestamp', config)
@@ -483,7 +483,7 @@ class PackageTests(unittest.TestCase):
     def test_beta_cli_final_commit_time_and_exact_zip_checksum(self):
         source = self.root / 'source'
         fixtures = {
-            pkg.PROJECT: self.csproj.read_bytes().replace(b'1.2.3.4', b'0.19.0.0'),
+            pkg.PROJECT: self.csproj.read_bytes().replace(b'1.2.3.4', b'0.20.0.0'),
             pkg.PROJECT.parent / 'Assets/i18n.js': b"var SHIPPED = ['en'];",
             pkg.PROJECT.parent / 'Assets/i18n/en.json': b'{}',
             pkg.PROJECT.parent / 'Assets/i18n-admin/en.json': b'{}',
@@ -511,7 +511,7 @@ class PackageTests(unittest.TestCase):
             self.assertEqual(config['project_url'], report['project_url'])
             self.assertIn('planned publication targets', stdout.getvalue())
             self.assertIn('public availability has not been verified', stdout.getvalue())
-            path = output / 'Babelfin-0.19.0.0.zip'
+            path = output / 'Babelfin-0.20.0.0.zip'
             digest = hashlib.md5(path.read_bytes(), usedforsecurity=False).hexdigest()
             self.assertEqual(digest, report['md5'])
             sha256 = hashlib.sha256(path.read_bytes()).hexdigest()
@@ -526,7 +526,7 @@ class PackageTests(unittest.TestCase):
             self.assertEqual(config['source_url'], release['sourceUrl'])
             self.assertEqual(config['repository_url'], release['repositoryUrl'])
             self.assertEqual(config['changelog'], release['changelog'])
-            self.assertEqual('0.19.0.0', release['version'])
+            self.assertEqual('0.20.0.0', release['version'])
             self.assertEqual('2026-10-23T05:41:08Z', release['timestamp'])
             self.assertEqual(digest, release['checksum'])
             with zipfile.ZipFile(path) as archive:

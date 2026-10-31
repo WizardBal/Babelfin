@@ -134,19 +134,19 @@ jobs:
             --output "$RUNNER_TEMP/babelfin-real-package"
           python tools/source_archive.py \
             --commit "$(git rev-parse HEAD)" \
-            --tag v0.19.0-beta.1 \
+            --tag v0.20.0-beta.1 \
             --output "$RUNNER_TEMP/babelfin-real-package"
           cp NOTICE "$RUNNER_TEMP/babelfin-real-package/NOTICE"
           (
             cd "$RUNNER_TEMP/babelfin-real-package"
-            sha256sum -c Babelfin-0.19.0.0.zip.sha256 Babelfin-0.19.0.0-source.zip.sha256
+            sha256sum -c Babelfin-0.20.0.0.zip.sha256 Babelfin-0.20.0.0-source.zip.sha256
             sha256sum --binary \
-              Babelfin-0.19.0.0.zip \
-              Babelfin-0.19.0.0.zip.md5 \
-              Babelfin-0.19.0.0.zip.sha256 \
+              Babelfin-0.20.0.0.zip \
+              Babelfin-0.20.0.0.zip.md5 \
+              Babelfin-0.20.0.0.zip.sha256 \
               manifest.json \
-              Babelfin-0.19.0.0-source.zip \
-              Babelfin-0.19.0.0-source.zip.sha256 \
+              Babelfin-0.20.0.0-source.zip \
+              Babelfin-0.20.0.0-source.zip.sha256 \
               NOTICE > "$RUNNER_TEMP/babelfin-tested-release.sha256"
           )
       - name: Verify release bytes
@@ -163,10 +163,10 @@ jobs:
           from pathlib import Path
 
           package, snapshot = map(Path, sys.argv[1:])
-          zip_name = "Babelfin-0.19.0.0.zip"
+          zip_name = "Babelfin-0.20.0.0.zip"
           files = [zip_name, zip_name + ".md5", zip_name + ".sha256",
                    "manifest.json",
-                   "Babelfin-0.19.0.0-source.zip", "Babelfin-0.19.0.0-source.zip.sha256", "NOTICE"]
+                   "Babelfin-0.20.0.0-source.zip", "Babelfin-0.20.0.0-source.zip.sha256", "NOTICE"]
           rows = [line.split(" *", 1) for line in snapshot.read_text(encoding="ascii").splitlines()]
           recorded = {name: digest for digest, name in rows}
           if len(rows) != len(files) or set(recorded) != set(files):
@@ -186,12 +186,12 @@ jobs:
           if-no-files-found: error
           include-hidden-files: false
           path: |
-            ${{ runner.temp }}/babelfin-real-package/Babelfin-0.19.0.0.zip
-            ${{ runner.temp }}/babelfin-real-package/Babelfin-0.19.0.0.zip.md5
-            ${{ runner.temp }}/babelfin-real-package/Babelfin-0.19.0.0.zip.sha256
+            ${{ runner.temp }}/babelfin-real-package/Babelfin-0.20.0.0.zip
+            ${{ runner.temp }}/babelfin-real-package/Babelfin-0.20.0.0.zip.md5
+            ${{ runner.temp }}/babelfin-real-package/Babelfin-0.20.0.0.zip.sha256
             ${{ runner.temp }}/babelfin-real-package/manifest.json
-            ${{ runner.temp }}/babelfin-real-package/Babelfin-0.19.0.0-source.zip
-            ${{ runner.temp }}/babelfin-real-package/Babelfin-0.19.0.0-source.zip.sha256
+            ${{ runner.temp }}/babelfin-real-package/Babelfin-0.20.0.0-source.zip
+            ${{ runner.temp }}/babelfin-real-package/Babelfin-0.20.0.0-source.zip.sha256
             ${{ runner.temp }}/babelfin-real-package/NOTICE
 
   reproducibility:
